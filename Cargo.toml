@@ -1,0 +1,38 @@
+[package]
+name = "vtx-core"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# Web 框架
+axum = "0.7"
+tokio = { version = "1", features = ["full"] }
+tower = "0.4"
+tower-http = { version = "0.5", features = ["trace", "cors"] }
+
+# Wasm 运行时
+wasmtime = { version = "21.0", features = ["component-model"] }
+wasmtime-wasi = "21.0"
+
+# 数据库
+rusqlite = { version = "0.31", features = ["bundled"] }
+r2d2 = "0.8"
+r2d2_sqlite = "0.24"
+rusqlite_migration = "1.2"
+
+# 工具
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+uuid = { version = "1", features = ["v4"] }
+walkdir = "2"
+tokio-util = { version = "0.7", features = ["io"] }
+notify = "6.1"
+regex = "1.10"
+
+# 可观测性
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# 配置管理
+config = "0.14"
