@@ -9,11 +9,11 @@ use tokio_util::io::ReaderStream;
 
 use crate::common::buffer::{BufferType, RealBuffer};
 
-/// 流式协议处理层，支持文件与内存缓冲区的响应构建
+/// HTTP 响应构建器：支持文件与内存缓冲区的异步流式传输
 pub struct StreamProtocolLayer;
 
 impl StreamProtocolLayer {
-    /// 主入口，根据资源类型构建 HTTP 响应
+    /// 主入口，根据 `RealBuffer` 类型动态构建响应内容
     pub async fn process(buffer: RealBuffer, headers: &HeaderMap) -> Response {
         match buffer.inner {
             BufferType::File(file) => Self::handle_file(file, buffer.path_hint, headers).await,
@@ -23,7 +23,7 @@ impl StreamProtocolLayer {
         }
     }
 
-    /// 处理文件资源（支持 Range 请求与 MIME 推断）
+    /// 构建文件响应（支持断点续传 Range、ETag 缓存校验、MIME 推断等）
     async fn handle_file(
         mut file: std::fs::File,
         path: Option<std::path::PathBuf>,
@@ -35,10 +35,21 @@ impl StreamProtocolLayer {
         };
         let file_size = metadata.len();
 
-        // MIME 类型推断（优先使用路径，其次使用文件魔数）
+        // 空文件：直接返回 200 OK 响应，不使用 Range
+        if file_size == 0 {
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_LENGTH, "0")
+                .body(Body::empty())
+                .unwrap()
+                .into_response();
+        }
+
+        // MIME 类型推断：优先使用文件路径，其次基于文件头魔数进行识别
         let content_type = if let Some(p) = path {
             mime_guess::from_path(p).first_raw().unwrap_or("video/mp4")
         } else {
+            // 读取前 4 字节用于判断格式
             let mut magic = [0u8; 4];
             let current_pos = file.stream_position().unwrap_or(0);
             let _ = file.seek(SeekFrom::Start(0));
@@ -50,7 +61,7 @@ impl StreamProtocolLayer {
             }
         };
 
-        // ETag 生成：基于文件大小和修改时间
+        // ETag 构造（用于缓存命中）：基于文件大小 + 最后修改时间
         let mtime = metadata
             .modified()
             .ok()
@@ -59,7 +70,7 @@ impl StreamProtocolLayer {
             .unwrap_or(0);
         let etag = format!(r#""{:x}-{:x}""#, file_size, mtime);
 
-        // 浏览器端缓存校验
+        // ETag 命中缓存，直接返回 304 Not Modified
         if headers
             .get(header::IF_NONE_MATCH)
             .and_then(|v| v.to_str().ok())
@@ -68,26 +79,37 @@ impl StreamProtocolLayer {
             return StatusCode::NOT_MODIFIED.into_response();
         }
 
-        // 解析 Range 请求头
+        // Range 解析（支持标准/后缀/开放范围）
         let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
         let (start, end) = match range_header {
             Some(range) if range.starts_with("bytes=") => {
-                let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
-                let s = parts
-                    .get(0)
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(0);
-                let e = parts
-                    .get(1)
-                    .and_then(|s| s.parse::<u64>().ok())
-                    .unwrap_or(file_size - 1);
-                (s, e.min(file_size - 1))
+                let range_val = &range["bytes=".len()..];
+                if let Some((s_str, e_str)) = range_val.split_once('-') {
+                    if s_str.is_empty() {
+                        // Case A: bytes=-500（取最后 500 字节）
+                        let suffix_len = e_str.parse::<u64>().unwrap_or(0);
+                        let start = file_size.saturating_sub(suffix_len);
+                        (start, file_size - 1)
+                    } else if e_str.is_empty() {
+                        // Case B: bytes=100-（从 100 到末尾）
+                        let s = s_str.parse::<u64>().unwrap_or(0);
+                        (s, file_size - 1)
+                    } else {
+                        // Case C: bytes=100-200（常规范围）
+                        let s = s_str.parse::<u64>().unwrap_or(0);
+                        let e = e_str.parse::<u64>().unwrap_or(file_size - 1);
+                        (s, e.min(file_size - 1))
+                    }
+                } else {
+                    // 无效格式，回退至全文传输
+                    (0, file_size - 1)
+                }
             }
             _ => (0, file_size - 1),
         };
 
-        // 范围校验
-        if start > end {
+        // 范围合法性检查
+        if start > end || start >= file_size {
             return (
                 StatusCode::RANGE_NOT_SATISFIABLE,
                 [(header::CONTENT_RANGE, format!("bytes */{}", file_size))],
@@ -95,18 +117,18 @@ impl StreamProtocolLayer {
                 .into_response();
         }
 
-        // 定位文件起始读取位置
+        // 定位至 Range 起始位置
         if let Err(_) = file.seek(SeekFrom::Start(start)) {
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
 
         let content_length = end - start + 1;
 
-        // 转换为 tokio 异步文件流
+        // 使用 tokio 异步流进行响应
         let tokio_file = TokioFile::from_std(file);
         let stream = ReaderStream::with_capacity(
             tokio::io::AsyncReadExt::take(tokio_file, content_length),
-            64 * 1024,
+            64 * 1024, // 64KB 传输缓冲区
         );
 
         Response::builder()
@@ -128,7 +150,7 @@ impl StreamProtocolLayer {
             .into_response()
     }
 
-    /// 处理内存缓冲区（如 JSON 响应）
+    /// 构建内存缓冲区响应（如 JSON、文本、HTML 等）
     async fn handle_memory(
         cursor: std::io::Cursor<Vec<u8>>,
         mime: Option<String>,
