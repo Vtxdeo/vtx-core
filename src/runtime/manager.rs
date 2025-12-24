@@ -1,16 +1,16 @@
-use std::sync::{Arc, RwLock};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
-use wasmtime::{Engine, component::Component};
-use notify::{Watcher, RecursiveMode, Event};
+use notify::{Event, RecursiveMode, Watcher};
+use wasmtime::{component::Component, Engine};
 
-use tracing::{info, error, warn, debug};
+use tracing::{debug, error, info, warn};
 
-use crate::registry::VideoRegistry;
-use crate::state::StreamContext;
-use crate::host::Plugin;
-use crate::host::api::auth_types::UserContext;
+use crate::runtime::context::StreamContext;
+use crate::runtime::host_impl::api::auth_types::UserContext;
+use crate::runtime::host_impl::Plugin;
+use crate::storage::registry::VideoRegistry;
 
 #[derive(Clone)]
 pub struct PluginManager {
@@ -23,7 +23,11 @@ pub struct PluginManager {
 
 impl PluginManager {
     /// 初始化插件管理器，并执行插件加载与数据库迁移
-    pub fn new(engine: Engine, wasm_path: PathBuf, registry: VideoRegistry) -> anyhow::Result<Self> {
+    pub fn new(
+        engine: Engine,
+        wasm_path: PathBuf,
+        registry: VideoRegistry,
+    ) -> anyhow::Result<Self> {
         info!("[PluginManager] Initializing plugin...");
         let component = Component::from_file(&engine, &wasm_path)?;
 
@@ -52,8 +56,12 @@ impl PluginManager {
     }
 
     /// 调用插件进行身份验证
+    ///
+    /// 前置条件：HTTP Header 已被收集。
+    /// 资源消耗：每次调用会实例化一个新的 Wasm 实例，注意性能影响。
     pub fn verify_identity(&self, headers: &axum::http::HeaderMap) -> Result<UserContext, u16> {
-        let wit_headers: Vec<(String, String)> = headers.iter()
+        let wit_headers: Vec<(String, String)> = headers
+            .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
@@ -62,23 +70,31 @@ impl PluginManager {
 
         let mut linker = wasmtime::component::Linker::new(&engine);
         wasmtime_wasi::add_to_linker_sync(&mut linker).ok();
-        crate::host::api::stream_io::add_to_linker(&mut linker, |ctx: &mut StreamContext| ctx).ok();
-        crate::host::api::sql::add_to_linker(&mut linker, |ctx: &mut StreamContext| ctx).ok();
+        crate::runtime::host_impl::api::stream_io::add_to_linker(
+            &mut linker,
+            |ctx: &mut StreamContext| ctx,
+        )
+        .ok();
+        crate::runtime::host_impl::api::sql::add_to_linker(
+            &mut linker,
+            |ctx: &mut StreamContext| ctx,
+        )
+        .ok();
 
         let ctx = StreamContext::new_secure(
             registry,
-            wasmtime::StoreLimitsBuilder::new().instances(5).build()
+            wasmtime::StoreLimitsBuilder::new().instances(5).build(),
         );
         let mut store = wasmtime::Store::new(&engine, ctx);
         let component = self.component.read().unwrap().clone();
 
-        let (plugin, _) = Plugin::instantiate(&mut store, &component, &linker)
-            .map_err(|e| {
-                error!("Plugin instantiation failed during authentication: {}", e);
-                500u16
-            })?;
+        let (plugin, _) = Plugin::instantiate(&mut store, &component, &linker).map_err(|e| {
+            error!("Plugin instantiation failed during authentication: {}", e);
+            500u16
+        })?;
 
-        plugin.call_authenticate(&mut store, &wit_headers)
+        plugin
+            .call_authenticate(&mut store, &wit_headers)
             .map_err(|e| {
                 error!("Authentication call failed: {}", e);
                 500u16
@@ -95,12 +111,18 @@ impl PluginManager {
     ) -> anyhow::Result<String> {
         let mut linker = wasmtime::component::Linker::new(engine);
         wasmtime_wasi::add_to_linker_sync(&mut linker)?;
-        crate::host::api::stream_io::add_to_linker(&mut linker, |ctx: &mut StreamContext| ctx)?;
-        crate::host::api::sql::add_to_linker(&mut linker, |ctx: &mut StreamContext| ctx)?;
+        crate::runtime::host_impl::api::stream_io::add_to_linker(
+            &mut linker,
+            |ctx: &mut StreamContext| ctx,
+        )?;
+        crate::runtime::host_impl::api::sql::add_to_linker(
+            &mut linker,
+            |ctx: &mut StreamContext| ctx,
+        )?;
 
         let ctx = StreamContext::new_secure(
             registry.clone(),
-            wasmtime::StoreLimitsBuilder::new().build()
+            wasmtime::StoreLimitsBuilder::new().build(),
         );
         let mut store = wasmtime::Store::new(engine, ctx);
 
@@ -115,14 +137,22 @@ impl PluginManager {
             ));
         }
 
-        info!("[Plugin] Detected plugin: {} (v{}) - {}", plugin_id, manifest.version, manifest.name);
+        info!(
+            "[Plugin] Detected plugin: {} (v{}) - {}",
+            plugin_id, manifest.version, manifest.name
+        );
 
         let declared_resources = plugin.call_get_resources(&mut store)?;
         let migrations = plugin.call_get_migrations(&mut store)?;
         let current_ver = registry.get_plugin_version(&plugin_id);
 
         if migrations.len() > current_ver {
-            info!("[PluginDB] Migrating plugin database: {} (v{} -> v{})", plugin_id, current_ver, migrations.len());
+            info!(
+                "[PluginDB] Migrating plugin database: {} (v{} -> v{})",
+                plugin_id,
+                current_ver,
+                migrations.len()
+            );
             let conn = registry.get_conn()?;
             for (idx, sql) in migrations.iter().enumerate().skip(current_ver) {
                 debug!("[PluginDB] Executing migration #{}: {}", idx + 1, sql);
@@ -180,7 +210,12 @@ impl PluginManager {
 
                                 match Component::from_file(&engine, &path) {
                                     Ok(new_component) => {
-                                        match Self::load_and_migrate(&engine, &new_component, &registry, &path) {
+                                        match Self::load_and_migrate(
+                                            &engine,
+                                            &new_component,
+                                            &registry,
+                                            &path,
+                                        ) {
                                             Ok(new_id) => {
                                                 *component_lock.write().unwrap() = new_component;
                                                 *current_id_lock.write().unwrap() = new_id.clone();
@@ -207,7 +242,10 @@ impl PluginManager {
     /// 卸载插件文件，可选择是否保留数据库数据
     pub fn uninstall(&self, keep_data: bool) -> anyhow::Result<()> {
         let plugin_id = self.get_plugin_id();
-        warn!("[Uninstall] Uninstalling plugin: {} (keep data: {})", plugin_id, keep_data);
+        warn!(
+            "[Uninstall] Uninstalling plugin: {} (keep data: {})",
+            plugin_id, keep_data
+        );
 
         let disabled_path = self.wasm_path.with_extension("wasm.disabled");
 

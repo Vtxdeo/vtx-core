@@ -1,12 +1,12 @@
-use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
-use uuid::Uuid;
-use serde::Serialize;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
-use tracing::{info, warn, debug, error};
+use serde::Serialize;
+use std::path::{Path, PathBuf};
+use tracing::{debug, error, info, warn};
+use uuid::Uuid;
+use walkdir::WalkDir;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct VideoMeta {
@@ -25,6 +25,11 @@ pub struct VideoRegistry {
 
 impl VideoRegistry {
     /// 初始化视频注册中心并执行数据库迁移
+    ///
+    /// 副作用：
+    /// - 如果数据库文件不存在，将创建文件。
+    /// - 执行 SQL 迁移，修改数据库 Schema。
+    /// - 设置 SQLite PRAGMA 参数（WAL 模式等）。
     pub fn new(db_path: &str) -> anyhow::Result<Self> {
         let manager = SqliteConnectionManager::file(db_path);
         let pool = Pool::new(manager)?;
@@ -39,21 +44,18 @@ impl VideoRegistry {
                     filename TEXT NOT NULL,
                     full_path TEXT NOT NULL UNIQUE
                 );
-                CREATE INDEX IF NOT EXISTS idx_full_path ON videos(full_path);"
+                CREATE INDEX IF NOT EXISTS idx_full_path ON videos(full_path);",
             ),
-
             // 视频创建时间字段
             M::up("ALTER TABLE videos ADD COLUMN created_at TEXT DEFAULT '1970-01-01 00:00:00';"),
-
             // 插件版本记录表
             M::up(
                 "CREATE TABLE IF NOT EXISTS sys_plugin_versions (
                     plugin_name TEXT PRIMARY KEY,
                     version INTEGER NOT NULL DEFAULT 0,
                     updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );"
+                );",
             ),
-
             // 插件资源账本
             M::up(
                 "CREATE TABLE IF NOT EXISTS sys_plugin_resources (
@@ -62,21 +64,23 @@ impl VideoRegistry {
                     resource_name TEXT NOT NULL,
                     created_at TEXT DEFAULT CURRENT_TIMESTAMP,
                     PRIMARY KEY (plugin_name, resource_type, resource_name)
-                );"
+                );",
             ),
-
             // 插件安装锁定表（绑定插件ID与物理路径）
             M::up(
                 "CREATE TABLE IF NOT EXISTS sys_plugin_installations (
                     plugin_id TEXT PRIMARY KEY,
                     file_path TEXT NOT NULL,
                     installed_at TEXT DEFAULT CURRENT_TIMESTAMP
-                );"
+                );",
             ),
         ]);
 
         if let Err(e) = migrations.to_latest(&mut conn) {
-            return Err(anyhow::anyhow!("Failed to apply database migrations: {}", e));
+            return Err(anyhow::anyhow!(
+                "Failed to apply database migrations: {}",
+                e
+            ));
         }
 
         conn.execute_batch(
@@ -84,7 +88,7 @@ impl VideoRegistry {
              PRAGMA synchronous = NORMAL;
              PRAGMA temp_store = MEMORY;
              PRAGMA mmap_size = 30000000000;
-             PRAGMA foreign_keys = ON;"
+             PRAGMA foreign_keys = ON;",
         )?;
 
         // 健康检查
@@ -100,6 +104,9 @@ impl VideoRegistry {
     }
 
     /// 扫描指定目录中的视频文件，并将新发现的视频注册到数据库中
+    ///
+    /// 复杂度边界：O(N)，N 为文件系统中的文件数量。
+    /// 副作用：向数据库写入新发现的视频记录。
     pub fn scan_directory(&self, dir_path: &str) -> Vec<VideoMeta> {
         let mut new_videos = Vec::new();
         let conn = self.pool.get().expect("Failed to acquire DB connection");
@@ -115,10 +122,12 @@ impl VideoRegistry {
 
         info!("[Scanner] Scanning directory: {:?}", root_path);
 
-        let mut stmt = conn.prepare(
-            "INSERT OR IGNORE INTO videos (id, filename, full_path, created_at)
-             VALUES (?1, ?2, ?3, datetime('now', 'localtime'))"
-        ).unwrap();
+        let mut stmt = conn
+            .prepare(
+                "INSERT OR IGNORE INTO videos (id, filename, full_path, created_at)
+             VALUES (?1, ?2, ?3, datetime('now', 'localtime'))",
+            )
+            .unwrap();
 
         for entry in WalkDir::new(dir_path).into_iter().filter_map(Result::ok) {
             let path = entry.path();
@@ -143,7 +152,9 @@ impl VideoRegistry {
                         let filename = path.file_name().unwrap().to_string_lossy().to_string();
                         let id = Uuid::new_v4().to_string();
 
-                        let rows = stmt.execute(params![&id, &filename, &full_path_str]).unwrap_or(0);
+                        let rows = stmt
+                            .execute(params![&id, &filename, &full_path_str])
+                            .unwrap_or(0);
                         if rows > 0 {
                             debug!("[Scanner] Registered new video: {} ({})", filename, id);
                             new_videos.push(VideoMeta {
@@ -164,18 +175,22 @@ impl VideoRegistry {
     /// 列出数据库中所有视频资源
     pub fn list_all(&self) -> Vec<VideoMeta> {
         let conn = self.pool.get().expect("Failed to acquire DB connection");
-        let mut stmt = conn.prepare(
-            "SELECT id, filename, full_path, created_at FROM videos ORDER BY created_at DESC"
-        ).unwrap();
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, filename, full_path, created_at FROM videos ORDER BY created_at DESC",
+            )
+            .unwrap();
 
-        let video_iter = stmt.query_map([], |row| {
-            Ok(VideoMeta {
-                id: row.get(0)?,
-                filename: row.get(1)?,
-                full_path: PathBuf::from(row.get::<_, String>(2)?),
-                created_at: row.get::<_, String>(3)?,
+        let video_iter = stmt
+            .query_map([], |row| {
+                Ok(VideoMeta {
+                    id: row.get(0)?,
+                    filename: row.get(1)?,
+                    full_path: PathBuf::from(row.get::<_, String>(2)?),
+                    created_at: row.get::<_, String>(3)?,
+                })
             })
-        }).unwrap();
+            .unwrap();
 
         video_iter.filter_map(Result::ok).collect()
     }
@@ -183,7 +198,9 @@ impl VideoRegistry {
     /// 通过 ID 查询视频的实际文件路径
     pub fn get_path(&self, id: &str) -> Option<PathBuf> {
         let conn = self.pool.get().ok()?;
-        let mut stmt = conn.prepare_cached("SELECT full_path FROM videos WHERE id = ?1").ok()?;
+        let mut stmt = conn
+            .prepare_cached("SELECT full_path FROM videos WHERE id = ?1")
+            .ok()?;
         let path_str: String = stmt.query_row(params![id], |row| row.get(0)).ok()?;
         let path = PathBuf::from(path_str);
 
@@ -207,10 +224,13 @@ impl VideoRegistry {
             "SELECT version FROM sys_plugin_versions WHERE plugin_name = ?1",
             [plugin_name],
             |row| row.get(0),
-        ).unwrap_or(0)
+        )
+        .unwrap_or(0)
     }
 
     /// 设置插件当前版本号
+    ///
+    /// 幂等性：该操作具备幂等性（Upsert）。
     pub fn set_plugin_version(&self, plugin_name: &str, new_version: usize) {
         let conn = self.pool.get().unwrap();
         conn.execute(
@@ -219,7 +239,8 @@ impl VideoRegistry {
              ON CONFLICT(plugin_name) DO UPDATE
              SET version = ?2, updated_at = CURRENT_TIMESTAMP",
             params![plugin_name, new_version],
-        ).unwrap();
+        )
+        .unwrap();
     }
 
     /// 插件资源注册
@@ -229,19 +250,25 @@ impl VideoRegistry {
             "INSERT OR IGNORE INTO sys_plugin_resources (plugin_name, resource_type, resource_name)
              VALUES (?1, ?2, ?3)",
             params![plugin_name, res_type, res_name],
-        ).ok();
+        )
+        .ok();
     }
 
     /// 安装验证与路径绑定机制
-    pub fn verify_installation(&self, plugin_id: &str, current_path: &Path) -> anyhow::Result<bool> {
+    ///
+    /// 确保同一个 Plugin ID 不会被绑定到不同的物理路径上，防止数据错乱。
+    pub fn verify_installation(
+        &self,
+        plugin_id: &str,
+        current_path: &Path,
+    ) -> anyhow::Result<bool> {
         let conn = self.pool.get()?;
 
         let abs_current = std::fs::canonicalize(current_path)?;
         let abs_current_str = abs_current.to_string_lossy().to_string();
 
-        let mut stmt = conn.prepare(
-            "SELECT file_path FROM sys_plugin_installations WHERE plugin_id = ?1"
-        )?;
+        let mut stmt =
+            conn.prepare("SELECT file_path FROM sys_plugin_installations WHERE plugin_id = ?1")?;
         let result: Option<String> = stmt.query_row([plugin_id], |row| row.get(0)).optional()?;
 
         match result {
@@ -259,9 +286,12 @@ impl VideoRegistry {
             None => {
                 conn.execute(
                     "INSERT INTO sys_plugin_installations (plugin_id, file_path) VALUES (?1, ?2)",
-                    params![plugin_id, abs_current_str]
+                    params![plugin_id, abs_current_str],
                 )?;
-                info!("[Install] Plugin '{}' locked to '{}'", plugin_id, abs_current_str);
+                info!(
+                    "[Install] Plugin '{}' locked to '{}'",
+                    plugin_id, abs_current_str
+                );
                 Ok(true)
             }
         }
@@ -270,18 +300,24 @@ impl VideoRegistry {
     /// 卸载插件时释放锁定记录
     pub fn release_installation(&self, plugin_id: &str) -> anyhow::Result<()> {
         let conn = self.pool.get()?;
-        conn.execute("DELETE FROM sys_plugin_installations WHERE plugin_id = ?1", [plugin_id])?;
+        conn.execute(
+            "DELETE FROM sys_plugin_installations WHERE plugin_id = ?1",
+            [plugin_id],
+        )?;
         Ok(())
     }
 
     /// 卸载插件并清除所有相关资源表与记录
+    ///
+    /// 副作用：执行 DROP TABLE 操作，数据不可恢复。
     pub fn nuke_plugin(&self, plugin_name: &str) -> anyhow::Result<usize> {
         let conn = self.pool.get()?;
 
         let mut stmt = conn.prepare(
             "SELECT resource_name FROM sys_plugin_resources WHERE plugin_name = ?1 AND resource_type = 'TABLE'"
         )?;
-        let tables: Vec<String> = stmt.query_map([plugin_name], |row| row.get(0))?
+        let tables: Vec<String> = stmt
+            .query_map([plugin_name], |row| row.get(0))?
             .filter_map(Result::ok)
             .collect();
 
@@ -292,8 +328,14 @@ impl VideoRegistry {
             }
         }
 
-        conn.execute("DELETE FROM sys_plugin_resources WHERE plugin_name = ?1", [plugin_name])?;
-        conn.execute("DELETE FROM sys_plugin_versions WHERE plugin_name = ?1", [plugin_name])?;
+        conn.execute(
+            "DELETE FROM sys_plugin_resources WHERE plugin_name = ?1",
+            [plugin_name],
+        )?;
+        conn.execute(
+            "DELETE FROM sys_plugin_versions WHERE plugin_name = ?1",
+            [plugin_name],
+        )?;
 
         Ok(1)
     }

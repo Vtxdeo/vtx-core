@@ -1,5 +1,5 @@
+use config::{Config, Environment, File};
 use serde::Deserialize;
-use config::{Config, File, Environment};
 use std::path::PathBuf;
 
 /// 应用配置总结构
@@ -43,10 +43,8 @@ impl Settings {
                 "plugins.location",
                 "target/wasm32-wasip1/release/vtx_demo_plugin.wasm",
             )?
-
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
-
             // 环境变量支持（如 VTX_SERVER__PORT=8080）
             .add_source(Environment::with_prefix("VTX").separator("__"));
 
