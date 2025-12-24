@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    info!("[Startup] vtxdeo Core 2.0 (Refactored) initializing...");
+    info!("[Startup] vtxdeo Core V0.1.1 initializing...");
 
     let settings = Settings::new().expect("Failed to load config");
     info!(

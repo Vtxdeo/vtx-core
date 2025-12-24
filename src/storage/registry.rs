@@ -1,8 +1,10 @@
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
+use rayon::prelude::*;
 use rusqlite::{params, OptionalExtension};
 use rusqlite_migration::{Migrations, M};
 use serde::Serialize;
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -103,69 +105,100 @@ impl VideoRegistry {
         Ok(Self { pool })
     }
 
-    /// 扫描指定目录中的视频文件，并将新发现的视频注册到数据库中
-    ///
-    /// 复杂度边界：O(N)，N 为文件系统中的文件数量。
-    /// 副作用：向数据库写入新发现的视频记录。
+    /// 扫描指定目录中的视频文件，并将新发现的视频注册到数据库中。
     pub fn scan_directory(&self, dir_path: &str) -> Vec<VideoMeta> {
-        let mut new_videos = Vec::new();
         let conn = self.pool.get().expect("Failed to acquire DB connection");
 
-        // 获取目录的真实路径（防止软链接逃逸）
+        // 校验并解析扫描根目录路径
+        // 安全边界保护：禁止软链接跳出预期目录
         let root_path = match std::fs::canonicalize(dir_path) {
             Ok(p) => p,
             Err(e) => {
-                error!("[Scanner] Failed to resolve scan root: {}", e);
+                error!("[scanner] failed to resolve scan root: {}", e);
                 return vec![];
             }
         };
 
-        info!("[Scanner] Scanning directory: {:?}", root_path);
+        info!("[scanner] start scanning directory: {:?}", root_path);
 
-        let mut stmt = conn
-            .prepare(
-                "INSERT OR IGNORE INTO videos (id, filename, full_path, created_at)
-             VALUES (?1, ?2, ?3, datetime('now', 'localtime'))",
-            )
-            .unwrap();
+        // 预读取数据库中已存在的文件路径，用于内存判重
+        let mut stmt = conn.prepare("SELECT full_path FROM videos").unwrap();
+        let existing_paths: HashSet<String> = stmt
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
 
-        for entry in WalkDir::new(dir_path).into_iter().filter_map(Result::ok) {
-            let path = entry.path();
-            if path.is_file() {
-                // 获取文件的真实路径
-                let real_path = match std::fs::canonicalize(path) {
-                    Ok(p) => p,
-                    Err(_) => continue,
-                };
+        // 使用并行遍历扫描目录，构造新的视频元数据集合
+        let new_videos: Vec<VideoMeta> = WalkDir::new(dir_path)
+            .into_iter()
+            .par_bridge()
+            .filter_map(Result::ok)
+            .filter(|entry| entry.path().is_file())
+            .filter_map(|entry| {
+                let path = entry.path();
 
-                // 检查路径是否在扫描根目录之下（防止目录逃逸）
-                if !real_path.starts_with(&root_path) {
-                    warn!("[Scanner] Skipped symlink traversal: {:?}", real_path);
-                    continue;
+                // 快速过滤：仅处理视频文件扩展名
+                let ext = path.extension()?.to_string_lossy().to_lowercase();
+                if !["mp4", "mkv", "mov", "avi", "webm"].contains(&ext.as_str()) {
+                    return None;
                 }
 
-                // 文件扩展名检查
-                if let Some(ext) = path.extension() {
-                    let ext_str = ext.to_string_lossy().to_lowercase();
-                    if ["mp4", "mkv", "mov", "avi", "webm"].contains(&ext_str.as_str()) {
-                        let full_path_str = real_path.to_string_lossy().to_string();
-                        let filename = path.file_name().unwrap().to_string_lossy().to_string();
-                        let id = Uuid::new_v4().to_string();
+                // 获取绝对路径，用于软链接安全检查
+                let real_path = std::fs::canonicalize(path).ok()?;
+                let full_path_str = real_path.to_string_lossy().to_string();
 
-                        let rows = stmt
-                            .execute(params![&id, &filename, &full_path_str])
-                            .unwrap_or(0);
-                        if rows > 0 {
-                            debug!("[Scanner] Registered new video: {} ({})", filename, id);
-                            new_videos.push(VideoMeta {
-                                id,
-                                filename,
-                                full_path: real_path,
-                                created_at: "Just Now".to_string(),
-                            });
-                        }
+                // 拒绝符号链接逃逸出根路径范围
+                if !real_path.starts_with(&root_path) {
+                    warn!("[scanner] symlink outside root skipped: {:?}", real_path);
+                    return None;
+                }
+
+                // 判重：若已存在于数据库中则跳过
+                if existing_paths.contains(&full_path_str) {
+                    return None;
+                }
+
+                Some(VideoMeta {
+                    id: Uuid::new_v4().to_string(),
+                    filename: path.file_name()?.to_string_lossy().to_string(),
+                    full_path: real_path,
+                    created_at: "Just Now".to_string(),
+                })
+            })
+            .collect();
+
+        // 将新视频批量写入数据库（事务提交以优化性能）
+        if !new_videos.is_empty() {
+            let mut conn = self.pool.get().unwrap();
+            let tx = conn.transaction().unwrap();
+
+            {
+                let mut stmt = tx
+                    .prepare(
+                        "INSERT OR IGNORE INTO videos (id, filename, full_path, created_at)
+                     VALUES (?1, ?2, ?3, datetime('now', 'localtime'))",
+                    )
+                    .unwrap();
+
+                for video in &new_videos {
+                    let path_str = video.full_path.to_string_lossy().to_string();
+                    if let Err(e) = stmt.execute(params![&video.id, &video.filename, &path_str]) {
+                        error!(
+                        "[scanner] failed to insert video: {} ({})",
+                        video.filename, e
+                    );
                     }
                 }
+            }
+
+            if let Err(e) = tx.commit() {
+                error!("[scanner] database transaction commit failed: {}", e);
+            } else {
+                info!(
+                "[scanner] scan completed: {} new videos registered",
+                new_videos.len()
+            );
             }
         }
 
