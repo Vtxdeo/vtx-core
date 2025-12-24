@@ -13,6 +13,8 @@ use axum::middleware as axum_middleware;
 use wasmtime::{Engine, Config};
 use wasmtime::component::Linker;
 use tower_http::trace::TraceLayer;
+use tower_http::cors::CorsLayer;
+use tower_http::catch_panic::CatchPanicLayer;
 use tracing::info;
 
 use crate::registry::VideoRegistry;
@@ -92,6 +94,11 @@ async fn main() -> anyhow::Result<()> {
 
         // 注入全局状态与中间件
         .with_state(state)
+        // 允许跨域请求 (CORS)，放在较内层，优先处理 OPTIONS
+        .layer(CorsLayer::permissive())
+        // 捕获 Panic 并返回 500，防止连接直接断开
+        .layer(CatchPanicLayer::new())
+        // 请求日志追踪，放在最外层（最后注册），确保能记录 Panic 后的 500 响应
         .layer(TraceLayer::new_for_http());
 
     // 启动服务监听
