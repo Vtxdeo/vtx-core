@@ -1,4 +1,4 @@
-use wasmtime_wasi::{WasiCtx, WasiView, ResourceTable, WasiCtxBuilder};
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::storage::registry::VideoRegistry;
 
@@ -51,11 +51,21 @@ impl WasiView for StreamContext {
 ///
 /// 职责：限制内存、表空间的增长，防止插件滥用资源。
 impl wasmtime::ResourceLimiter for StreamContext {
-    fn memory_growing(&mut self, current: usize, desired: usize, maximum: Option<usize>) -> wasmtime::Result<bool> {
+    fn memory_growing(
+        &mut self,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
+    ) -> wasmtime::Result<bool> {
         self.limiter.memory_growing(current, desired, maximum)
     }
 
-    fn table_growing(&mut self, current: u32, desired: u32, maximum: Option<u32>) -> wasmtime::Result<bool> {
+    fn table_growing(
+        &mut self,
+        current: u32,
+        desired: u32,
+        maximum: Option<u32>,
+    ) -> wasmtime::Result<bool> {
         self.limiter.table_growing(current, desired, maximum)
     }
 }

@@ -1,12 +1,12 @@
 use axum::{
     body::Body,
-    http::{HeaderMap, StatusCode, header},
-    response::{Response, IntoResponse},
+    http::{header, HeaderMap, StatusCode},
+    response::{IntoResponse, Response},
 };
+use std::fs::File;
 use std::io::{Seek, SeekFrom};
 use tokio::fs::File as TokioFile;
 use tokio_util::io::ReaderStream;
-use std::fs::File;
 
 /// 视频流响应构造工具
 pub struct VideoStreamer;
@@ -28,7 +28,8 @@ impl VideoStreamer {
             Some(range) if range.starts_with("bytes=") => {
                 let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
                 let start = parts.get(0).and_then(|s| s.parse().ok()).unwrap_or(0);
-                let end = parts.get(1)
+                let end = parts
+                    .get(1)
                     .and_then(|s| s.parse().ok())
                     .unwrap_or(file_size - 1);
                 (start, end)
@@ -61,7 +62,10 @@ impl VideoStreamer {
             .header("Content-Type", "video/mp4")
             .header("Accept-Ranges", "bytes")
             .header("Content-Length", content_length.to_string())
-            .header("Content-Range", format!("bytes {}-{}/{}", start, end, file_size))
+            .header(
+                "Content-Range",
+                format!("bytes {}-{}/{}", start, end, file_size),
+            )
             .body(Body::from_stream(stream))
             .unwrap()
             .into_response()

@@ -1,8 +1,8 @@
-use wasmtime::Engine;
-use wasmtime::component::Linker;
-use crate::storage::registry::VideoRegistry;
-use crate::runtime::manager::PluginManager;
 use crate::runtime::context::StreamContext;
+use crate::runtime::manager::PluginManager;
+use crate::storage::registry::VideoRegistry;
+use wasmtime::component::Linker;
+use wasmtime::Engine;
 
 /// Web 应用全局状态
 ///

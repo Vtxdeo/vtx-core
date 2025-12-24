@@ -1,13 +1,13 @@
+use crate::common::buffer::BufferType;
+use crate::runtime::executor::PluginExecutor;
+use crate::web::{state::AppState, utils::streaming::VideoStreamer};
 use axum::{
+    body::Body,
     extract::{Path, State},
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    body::Body,
 };
 use std::sync::Arc;
-use crate::web::{state::AppState, utils::streaming::VideoStreamer};
-use crate::common::buffer::BufferType;
-use crate::runtime::executor::PluginExecutor;
 
 /// 插件业务执行 Handler
 ///
