@@ -45,18 +45,42 @@ async fn main() -> anyhow::Result<()> {
     let mut wasm_config = wasmtime::Config::new();
     wasm_config.wasm_component_model(true);
     wasm_config.async_support(false);
+
+    let mut pooling_strategy = wasmtime::PoolingAllocationConfig::default();
+
+    // 设置最大保留的热实例槽位
+    pooling_strategy.max_unused_warm_slots(16);
+
+    // 设置单个线性内存的最大页数
+    // Wasm 页大小为 64KB。100MB ≈ 1600 页
+    // 计算: 100 * 1024 * 1024 / 65536 = 1600
+    pooling_strategy.memory_pages(1600);
+
+    // 设置并发组件实例上限
+    pooling_strategy.total_component_instances(100);
+
+    wasm_config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(
+        pooling_strategy,
+    ));
+
     let engine = wasmtime::Engine::new(&wasm_config)?;
 
+    // 构建全局 Linker，注册宿主函数
+    // 这一步只在启动时执行一次
     let mut linker = Linker::<crate::runtime::context::StreamContext>::new(&engine);
     wasmtime_wasi::add_to_linker_sync(&mut linker)?;
     api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
     api::sql::add_to_linker(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url)?;
+
+    // 初始化插件管理器
+    // 传入 linker 以支持在加载阶段进行预编译 (Pre-linking)
     let plugin_manager = PluginManager::new(
         engine.clone(),
         settings.plugins.location.clone(),
         registry.clone(),
+        linker,
     )?;
 
     // 构造全局状态
@@ -64,7 +88,6 @@ async fn main() -> anyhow::Result<()> {
         engine,
         plugin_manager,
         registry,
-        linker,
     });
 
     // 路由定义

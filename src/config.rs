@@ -15,6 +15,7 @@ pub struct Settings {
 pub struct ServerSettings {
     pub host: String,
     pub port: u16,
+    #[allow(dead_code)]
     pub asset_root: String,
 }
 

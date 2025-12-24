@@ -22,12 +22,12 @@ impl PluginExecutor {
     ) -> Result<(RealBuffer, u16), String> {
         let engine = state.engine.clone();
         let registry = state.registry.clone();
-        let component = state.plugin_manager.get_component();
-        let linker = state.linker.clone();
+        let instance_pre = state.plugin_manager.get_instance_pre();
 
         // 异步任务中执行阻塞的 Wasm 调用
         tokio::task::spawn_blocking(move || {
             // 设置单次执行资源上限
+            // 注意：当启用 Pooling Allocator 时，memory_size 必须小于等于 pool 配置的 max_memory_size
             let limits = wasmtime::StoreLimitsBuilder::new()
                 .memory_size(100 * 1024 * 1024)
                 .instances(5)
@@ -38,8 +38,13 @@ impl PluginExecutor {
             let mut store = Store::new(&engine, ctx);
             store.limiter(|s| &mut s.limiter);
 
-            let (plugin, _) = Plugin::instantiate(&mut store, &component, &linker)
-                .map_err(|e| format!("Instantiation failed: {}", e))?;
+            let instance = instance_pre
+                .instantiate(&mut store)
+                .map_err(|e| format!("Fast instantiation failed: {}", e))?;
+
+            // 使用生成的 Instance 构建强类型 Plugin 包装器
+            let plugin = Plugin::new(&mut store, &instance)
+                .map_err(|e| format!("Plugin binding failed: {}", e))?;
 
             let req = api::types::HttpRequest {
                 method: "GET".to_string(),

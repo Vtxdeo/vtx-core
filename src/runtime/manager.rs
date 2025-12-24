@@ -3,7 +3,8 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use notify::{Event, RecursiveMode, Watcher};
-use wasmtime::{component::Component, Engine};
+use wasmtime::component::{Component, InstancePre, Linker};
+use wasmtime::Engine;
 
 use tracing::{debug, error, info, warn};
 
@@ -15,7 +16,9 @@ use crate::storage::registry::VideoRegistry;
 #[derive(Clone)]
 pub struct PluginManager {
     engine: Engine,
+    instance_pre: Arc<RwLock<InstancePre<StreamContext>>>,
     component: Arc<RwLock<Component>>,
+    linker: Linker<StreamContext>,
     wasm_path: PathBuf,
     registry: VideoRegistry,
     current_id: Arc<RwLock<String>>,
@@ -27,17 +30,32 @@ impl PluginManager {
         engine: Engine,
         wasm_path: PathBuf,
         registry: VideoRegistry,
+        linker: Linker<StreamContext>,
     ) -> anyhow::Result<Self> {
         info!("[PluginManager] Initializing plugin...");
+        
+        if !wasm_path.exists() {
+            return Err(anyhow::anyhow!(
+                "Plugin binary not found at: {:?}.\nHint: Please ensure the WASM module is compiled (e.g., 'cargo build --target wasm32-wasip1 --release').",
+                wasm_path
+            ));
+        }
+
         let component = Component::from_file(&engine, &wasm_path)?;
 
+        // 执行一次性加载任务（迁移、校验）
         let plugin_id = Self::load_and_migrate(&engine, &component, &registry, &wasm_path)?;
+
+        // 生成 InstancePre
+        let instance_pre = linker.instantiate_pre(&component)?;
 
         info!("[PluginManager] Plugin loaded: {}", plugin_id);
 
         let manager = Self {
             engine: engine.clone(),
+            instance_pre: Arc::new(RwLock::new(instance_pre)),
             component: Arc::new(RwLock::new(component)),
+            linker,
             wasm_path: wasm_path.clone(),
             registry,
             current_id: Arc::new(RwLock::new(plugin_id)),
@@ -47,6 +65,11 @@ impl PluginManager {
         Ok(manager)
     }
 
+    pub fn get_instance_pre(&self) -> InstancePre<StreamContext> {
+        self.instance_pre.read().unwrap().clone()
+    }
+    
+    #[allow(dead_code)]
     pub fn get_component(&self) -> Component {
         self.component.read().unwrap().clone()
     }
@@ -179,9 +202,13 @@ impl PluginManager {
     fn start_watcher(&self) {
         let path = self.wasm_path.clone();
         let engine = self.engine.clone();
+
         let component_lock = self.component.clone();
+        let instance_pre_lock = self.instance_pre.clone();
         let current_id_lock = self.current_id.clone();
+
         let registry = self.registry.clone();
+        let linker = self.linker.clone();
 
         std::thread::spawn(move || {
             let (tx, rx) = std::sync::mpsc::channel();
@@ -217,12 +244,29 @@ impl PluginManager {
                                             &path,
                                         ) {
                                             Ok(new_id) => {
-                                                *component_lock.write().unwrap() = new_component;
-                                                *current_id_lock.write().unwrap() = new_id.clone();
-                                                info!("[HotReload] Reload complete: {}", new_id);
+                                                match linker.instantiate_pre(&new_component) {
+                                                    Ok(new_pre) => {
+                                                        *component_lock.write().unwrap() =
+                                                            new_component;
+                                                        *instance_pre_lock.write().unwrap() =
+                                                            new_pre;
+                                                        *current_id_lock.write().unwrap() =
+                                                            new_id.clone();
+                                                        info!("[HotReload] Reload complete: {}", new_id);
+                                                    }
+                                                    Err(e) => {
+                                                        error!(
+                                                            "[HotReload] Link failed during reload: {}",
+                                                            e
+                                                        );
+                                                    }
+                                                }
                                             }
                                             Err(e) => {
-                                                error!("[HotReload] Migration failed during reload: {}", e);
+                                                error!(
+                                                    "[HotReload] Migration failed during reload: {}",
+                                                    e
+                                                );
                                             }
                                         }
                                     }
