@@ -28,8 +28,8 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("vtx_core=info".parse().unwrap())
-                .add_directive("tower_http=debug".parse().unwrap()),
+                .add_directive("vtx_core=info".parse()?)
+                .add_directive("tower_http=debug".parse()?),
         )
         .init();
 
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
 
     // 构建全局 Linker，注册宿主函数
     // 这一步只在启动时执行一次
-    let mut linker = Linker::<crate::runtime::context::StreamContext>::new(&engine);
+    let mut linker = Linker::<runtime::context::StreamContext>::new(&engine);
     wasmtime_wasi::add_to_linker_sync(&mut linker)?;
     api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
     api::sql::add_to_linker(&mut linker, |ctx| ctx)?;
