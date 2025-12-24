@@ -29,6 +29,7 @@ walkdir = "2"
 tokio-util = { version = "0.7", features = ["io"] }
 notify = "6.1"
 regex = "1.10"
+mime_guess = "2.0"
 
 # 可观测性
 tracing = "0.1"

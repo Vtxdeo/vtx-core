@@ -1,19 +1,21 @@
 use std::fs::File;
 use std::io::Cursor;
+use std::path::PathBuf;
 
-/// 表示统一的缓冲区类型，用于支持多种数据来源（文件或内存）
-///
-/// - `File`：从本地文件系统读取的数据，持有文件句柄。
-/// - `Memory`：内存中的字节缓冲区（通常用于临时数据或内存回放）。
+/// 表示统一的缓冲区类型，支持多种数据来源
 pub enum BufferType {
+    /// 从本地文件系统读取的数据
     File(File),
+    /// 内存中的字节缓冲区
     Memory(Cursor<Vec<u8>>),
 }
 
-/// 封装通用缓冲区类型的结构体
-///
-/// 职责：使用统一接口处理底层数据源，支持文件与内存数据复用场景。
-/// 该结构体通常被注册到 Wasmtime 的 ResourceTable 中。
+/// 封装通用缓冲区及其元数据
+/// 职责：持有底层数据源，并提供路径或 MIME 类型线索供协议层嗅探
 pub struct RealBuffer {
     pub inner: BufferType,
+    /// 路径线索：用于文件扩展名 MIME 嗅探
+    pub path_hint: Option<PathBuf>,
+    /// MIME 覆盖：插件可显式指定内容类型（如 "application/json"）
+    pub mime_override: Option<String>,
 }
