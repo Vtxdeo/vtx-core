@@ -12,7 +12,7 @@ pub(crate) fn get_plugin_version(pool: &Pool<SqliteConnectionManager>, plugin_na
         [plugin_name],
         |row| row.get(0),
     )
-        .unwrap_or(0)
+    .unwrap_or(0)
 }
 
 /// 更新插件版本 (幂等)
@@ -22,13 +22,15 @@ pub(crate) fn set_plugin_version(
     new_version: usize,
 ) {
     if let Ok(conn) = pool.get() {
-        let _ = conn.execute(
-            "INSERT INTO sys_plugin_versions (plugin_name, version)
+        let _ = conn
+            .execute(
+                "INSERT INTO sys_plugin_versions (plugin_name, version)
              VALUES (?1, ?2)
              ON CONFLICT(plugin_name) DO UPDATE
              SET version = ?2, updated_at = CURRENT_TIMESTAMP",
-            params![plugin_name, new_version],
-        ).map_err(|e| error!("[Database] Failed to set plugin version: {}", e));
+                params![plugin_name, new_version],
+            )
+            .map_err(|e| error!("[Database] Failed to set plugin version: {}", e));
     }
 }
 
@@ -81,7 +83,10 @@ pub(crate) fn verify_installation(
                 "INSERT INTO sys_plugin_installations (plugin_id, file_path) VALUES (?1, ?2)",
                 params![plugin_id, abs_current_str],
             )?;
-            info!("[Install] Locked plugin '{}' to '{}'", plugin_id, abs_current_str);
+            info!(
+                "[Install] Locked plugin '{}' to '{}'",
+                plugin_id, abs_current_str
+            );
             Ok(true)
         }
     }

@@ -2,8 +2,8 @@ use crate::web::state::AppState;
 use axum::{
     extract::{Json, Query, State},
     http::StatusCode,
-    Json as AxumJson,
     response::IntoResponse,
+    Json as AxumJson,
 };
 use serde::Deserialize;
 use std::sync::Arc;

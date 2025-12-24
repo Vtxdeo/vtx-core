@@ -100,9 +100,7 @@ pub(crate) fn scan_directory(
 }
 
 /// 全量列出视频
-pub(crate) fn list_all(
-    pool: &Pool<SqliteConnectionManager>,
-) -> anyhow::Result<Vec<VideoMeta>> {
+pub(crate) fn list_all(pool: &Pool<SqliteConnectionManager>) -> anyhow::Result<Vec<VideoMeta>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
         "SELECT id, filename, full_path, created_at FROM videos ORDER BY created_at DESC",
@@ -125,10 +123,7 @@ pub(crate) fn list_all(
 }
 
 /// 根据 ID 获取路径
-pub(crate) fn get_path(
-    pool: &Pool<SqliteConnectionManager>,
-    id: &str,
-) -> Option<PathBuf> {
+pub(crate) fn get_path(pool: &Pool<SqliteConnectionManager>, id: &str) -> Option<PathBuf> {
     let conn = pool.get().ok()?;
     let mut stmt = conn
         .prepare_cached("SELECT full_path FROM videos WHERE id = ?1")

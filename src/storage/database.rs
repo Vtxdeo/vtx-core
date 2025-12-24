@@ -63,7 +63,10 @@ pub(crate) fn initialize_pool(
     ]);
 
     if let Err(e) = migrations.to_latest(&mut conn) {
-        return Err(anyhow::anyhow!("Failed to apply database migrations: {}", e));
+        return Err(anyhow::anyhow!(
+            "Failed to apply database migrations: {}",
+            e
+        ));
     }
 
     // 优化 SQLite 性能参数
