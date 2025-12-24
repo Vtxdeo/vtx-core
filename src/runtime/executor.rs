@@ -1,5 +1,5 @@
 use crate::common::buffer::RealBuffer;
-use crate::runtime::context::StreamContext;
+use crate::runtime::context::{SecurityPolicy, StreamContext};
 use crate::runtime::host_impl::{api, Plugin};
 use crate::web::state::AppState;
 use std::sync::Arc;
@@ -34,7 +34,9 @@ impl PluginExecutor {
                 .tables(1000)
                 .build();
 
-            let ctx = StreamContext::new_secure(registry, limits);
+            // 业务请求执行策略：Root (允许文件IO和数据库操作)
+            let ctx = StreamContext::new_secure(registry, limits, SecurityPolicy::Root);
+
             let mut store = Store::new(&engine, ctx);
             store.limiter(|s| &mut s.limiter);
 

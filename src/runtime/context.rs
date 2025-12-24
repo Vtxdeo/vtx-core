@@ -2,26 +2,33 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::storage::registry::VideoRegistry;
 
+/// 安全策略等级
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SecurityPolicy {
+    /// 根权限：允许所有操作（文件IO、数据库读写）
+    /// 适用于：正常请求处理 (PluginExecutor)
+    Root,
+    /// 受限权限：仅允许只读 SQL，禁止文件 IO
+    /// 适用于：身份验证 (verify_identity)
+    Restricted,
+}
+
 /// 插件沙箱运行时上下文
-///
-/// 包含受限的 WASI 环境、资源表、插件注册表和执行限制器。
 pub struct StreamContext {
     pub table: ResourceTable,
     pub wasi: WasiCtx,
     pub registry: VideoRegistry,
     pub limiter: wasmtime::StoreLimits,
+    pub policy: SecurityPolicy,
 }
 
 impl StreamContext {
     /// 创建一个零信任的插件沙箱上下文
-    ///
-    /// 安全策略包括：
-    /// 1. 继承标准输入输出，仅用于日志目的。
-    /// 2. 不注入宿主环境变量，避免敏感信息泄露（如云服务密钥等）。
-    /// 3. 禁止访问宿主传参，仅注入固定参数。
-    /// 4. 不开放宿主文件系统，插件无法访问宿主磁盘。
-    ///    所有文件访问必须通过 Host 的 stream_io 接口实现。
-    pub fn new_secure(registry: VideoRegistry, limiter: wasmtime::StoreLimits) -> Self {
+    pub fn new_secure(
+        registry: VideoRegistry,
+        limiter: wasmtime::StoreLimits,
+        policy: SecurityPolicy,
+    ) -> Self {
         let wasi = WasiCtxBuilder::new()
             .inherit_stdio()
             .env("VTX_ENV", "production")
@@ -33,6 +40,7 @@ impl StreamContext {
             wasi,
             registry,
             limiter,
+            policy,
         }
     }
 }

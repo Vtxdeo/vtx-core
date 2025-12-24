@@ -185,9 +185,9 @@ impl VideoRegistry {
                     let path_str = video.full_path.to_string_lossy().to_string();
                     if let Err(e) = stmt.execute(params![&video.id, &video.filename, &path_str]) {
                         error!(
-                        "[scanner] failed to insert video: {} ({})",
-                        video.filename, e
-                    );
+                            "[scanner] failed to insert video: {} ({})",
+                            video.filename, e
+                        );
                     }
                 }
             }
@@ -196,9 +196,9 @@ impl VideoRegistry {
                 error!("[scanner] database transaction commit failed: {}", e);
             } else {
                 info!(
-                "[scanner] scan completed: {} new videos registered",
-                new_videos.len()
-            );
+                    "[scanner] scan completed: {} new videos registered",
+                    new_videos.len()
+                );
             }
         }
 

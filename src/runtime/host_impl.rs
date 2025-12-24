@@ -4,7 +4,7 @@ use std::io::{Cursor, Read, Seek, SeekFrom};
 use wasmtime::component::Resource;
 
 use crate::common::buffer::{BufferType, RealBuffer};
-use crate::runtime::context::StreamContext;
+use crate::runtime::context::{SecurityPolicy, StreamContext};
 
 // 绑定 vtx.wit 中的插件接口
 wasmtime::component::bindgen!({
@@ -41,8 +41,17 @@ impl BufferIo for BufferType {
 }
 
 /// 插件侧调用：打开宿主文件资源
-impl vtx::api::stream_io::Host for StreamContext {
+impl api::stream_io::Host for StreamContext {
     fn open_file(&mut self, uuid: String) -> Result<Resource<RealBuffer>, String> {
+        // [安全拦截] 鉴权模式下禁止访问文件系统
+        if self.policy == SecurityPolicy::Restricted {
+            tracing::warn!(
+                "[Security] Blocked file access in restricted mode: {}",
+                uuid
+            );
+            return Err("Permission Denied: File access is disabled in this context".into());
+        }
+
         let file_path = self
             .registry
             .get_path(&uuid)
@@ -76,7 +85,7 @@ impl vtx::api::stream_io::Host for StreamContext {
 }
 
 /// 插件侧调用：缓冲区操作实现
-impl vtx::api::stream_io::HostBuffer for StreamContext {
+impl api::stream_io::HostBuffer for StreamContext {
     fn size(&mut self, resource: Resource<RealBuffer>) -> u64 {
         self.table
             .get(&resource)
@@ -106,12 +115,21 @@ impl vtx::api::stream_io::HostBuffer for StreamContext {
 }
 
 /// 插件侧调用：执行 SQL 语句
-impl vtx::api::sql::Host for StreamContext {
+impl api::sql::Host for StreamContext {
     fn execute(
         &mut self,
         statement: String,
-        params: Vec<vtx::api::sql::DbValue>,
+        params: Vec<api::sql::DbValue>,
     ) -> Result<u64, String> {
+        // [安全拦截] 鉴权模式下禁止写入数据库
+        if self.policy == SecurityPolicy::Restricted {
+            tracing::warn!(
+                "[Security] Blocked SQL write in restricted mode: {}",
+                statement
+            );
+            return Err("Permission Denied: Database write is disabled in this context".into());
+        }
+
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
         let sql_params = convert_params(&params);
         let param_refs: Vec<&dyn ToSql> = sql_params.iter().map(|b| b.as_ref()).collect();
@@ -124,8 +142,9 @@ impl vtx::api::sql::Host for StreamContext {
     fn query_json(
         &mut self,
         statement: String,
-        params: Vec<vtx::api::sql::DbValue>,
+        params: Vec<api::sql::DbValue>,
     ) -> Result<String, String> {
+        // 查询操作在所有模式下均允许
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
         let sql_params = convert_params(&params);
         let param_refs: Vec<&dyn ToSql> = sql_params.iter().map(|b| b.as_ref()).collect();
@@ -162,7 +181,7 @@ impl vtx::api::sql::Host for StreamContext {
 }
 
 /// 工具函数：将插件传入的参数类型转换为 rusqlite 支持的 ToSql trait 对象
-fn convert_params(params: &[vtx::api::sql::DbValue]) -> Vec<Box<dyn ToSql>> {
+fn convert_params(params: &[api::sql::DbValue]) -> Vec<Box<dyn ToSql>> {
     params
         .iter()
         .map(|p| match p {
