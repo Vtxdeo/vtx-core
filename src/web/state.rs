@@ -1,5 +1,5 @@
 use crate::runtime::manager::PluginManager;
-use crate::storage::registry::VideoRegistry;
+use crate::storage::VideoRegistry;
 use wasmtime::Engine;
 
 /// Web 应用全局状态

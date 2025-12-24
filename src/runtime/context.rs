@@ -1,6 +1,6 @@
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
-use crate::storage::registry::VideoRegistry;
+use crate::storage::VideoRegistry;
 
 /// 安全策略等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

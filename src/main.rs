@@ -15,7 +15,7 @@ use wasmtime::component::Linker;
 
 use crate::config::Settings;
 use crate::runtime::{host_impl::api, manager::PluginManager};
-use crate::storage::registry::VideoRegistry;
+use crate::storage::VideoRegistry;
 use crate::web::{
     api::{admin, plugin},
     middleware::auth::auth_middleware,
@@ -72,7 +72,7 @@ async fn main() -> anyhow::Result<()> {
     api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
     api::sql::add_to_linker(&mut linker, |ctx| ctx)?;
 
-    let registry = VideoRegistry::new(&settings.database.url)?;
+    let registry = VideoRegistry::new(&settings.database.url, 120)?;
 
     // 初始化插件管理器
     // 传入 linker 以支持在加载阶段进行预编译 (Pre-linking)

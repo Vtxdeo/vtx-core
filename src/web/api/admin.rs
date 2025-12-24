@@ -1,8 +1,9 @@
-use crate::storage::registry::VideoMeta;
 use crate::web::state::AppState;
 use axum::{
     extract::{Json, Query, State},
+    http::StatusCode,
     Json as AxumJson,
+    response::IntoResponse,
 };
 use serde::Deserialize;
 use std::sync::Arc;
@@ -24,17 +25,35 @@ pub async fn scan_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRequest>,
 ) -> AxumJson<serde_json::Value> {
-    let new_videos = state.registry.scan_directory(&payload.path);
-    AxumJson(serde_json::json!({
-        "status": "success",
-        "scanned_count": new_videos.len(),
-        "data": new_videos
-    }))
+    match state.registry.scan_directory(&payload.path) {
+        Ok(new_videos) => AxumJson(serde_json::json!({
+            "status": "success",
+            "scanned_count": new_videos.len(),
+            "data": new_videos
+        })),
+        Err(e) => {
+            tracing::error!("[Admin] Scan failed: {}", e);
+            AxumJson(serde_json::json!({
+                "status": "error",
+                "message": e.to_string()
+            }))
+        }
+    }
 }
 
 /// 列表查询接口
-pub async fn list_handler(State(state): State<Arc<AppState>>) -> AxumJson<Vec<VideoMeta>> {
-    AxumJson(state.registry.list_all())
+pub async fn list_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+    match state.registry.list_all() {
+        Ok(videos) => AxumJson(videos).into_response(),
+        Err(e) => {
+            tracing::error!("[Admin] List videos failed: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Database error: {}", e),
+            )
+                .into_response()
+        }
+    }
 }
 
 /// 卸载插件接口

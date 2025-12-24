@@ -10,7 +10,7 @@ use wasmtime::{
 
 use super::loader;
 use crate::runtime::context::StreamContext;
-use crate::storage::registry::VideoRegistry;
+use crate::storage::VideoRegistry;
 
 /// 热更新上下文，包含插件引擎、链接器、注册表及共享状态
 pub struct HotReloadContext {

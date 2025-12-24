@@ -2,7 +2,7 @@ use crate::runtime::{
     context::{SecurityPolicy, StreamContext},
     host_impl::Plugin,
 };
-use crate::storage::registry::VideoRegistry;
+use crate::storage::VideoRegistry;
 use std::path::Path;
 use tracing::{debug, error, info};
 use wasmtime::{

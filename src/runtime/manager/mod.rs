@@ -10,7 +10,7 @@ use wasmtime::Engine;
 use crate::runtime::context::{SecurityPolicy, StreamContext};
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::Plugin;
-use crate::storage::registry::VideoRegistry;
+use crate::storage::VideoRegistry;
 
 /// 插件管理器：负责插件加载、验证调用、热更新与卸载管理
 #[derive(Clone)]
