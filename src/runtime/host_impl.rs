@@ -1,12 +1,12 @@
 use rusqlite::types::ToSql;
+use serde_json::{Map, Value};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use wasmtime::component::Resource;
-use serde_json::{Map, Value};
 
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::StreamContext;
 
-// 生成 WIT 绑定
+// 绑定 vtx.wit 中的插件接口
 wasmtime::component::bindgen!({
     path: "../vtx-sdk/wit/vtx.wit",
     world: "plugin",
@@ -17,7 +17,7 @@ wasmtime::component::bindgen!({
 
 pub use vtx::api;
 
-/// 内部辅助 Trait：统一处理文件与内存流的 IO 操作
+/// 内部 Trait：抽象化对文件和内存流的统一读取能力
 trait BufferIo {
     fn get_size(&self) -> u64;
     fn read_at(&mut self, offset: u64, dest: &mut [u8]) -> usize;
@@ -40,10 +40,14 @@ impl BufferIo for BufferType {
     }
 }
 
-/// 实现插件与宿主之间的 Stream IO 文件读写能力
+/// 插件侧调用：打开宿主文件资源
 impl vtx::api::stream_io::Host for StreamContext {
     fn open_file(&mut self, uuid: String) -> Result<Resource<RealBuffer>, String> {
-        let file_path = self.registry.get_path(&uuid).ok_or_else(|| "UUID not found".to_string())?;
+        let file_path = self
+            .registry
+            .get_path(&uuid)
+            .ok_or_else(|| "UUID not found".to_string())?;
+
         let file = std::fs::File::open(&file_path).map_err(|e| format!("IO Error: {}", e))?;
 
         let rb = RealBuffer {
@@ -51,8 +55,10 @@ impl vtx::api::stream_io::Host for StreamContext {
             path_hint: Some(file_path),
             mime_override: None,
         };
-        // ResourceTable::push 返回的是 ResourceTableError，需转为 String
-        self.table.push(rb).map_err(|e| format!("Resource Table Error: {}", e))
+
+        self.table
+            .push(rb)
+            .map_err(|e| format!("Resource Table Error: {}", e))
     }
 
     fn create_memory_buffer(&mut self, data: Vec<u8>) -> Resource<RealBuffer> {
@@ -61,21 +67,26 @@ impl vtx::api::stream_io::Host for StreamContext {
             path_hint: None,
             mime_override: Some("application/json".to_string()),
         };
-        self.table.push(rb).expect("Critical: Failed to allocate buffer resource")
+
+        // 内存缓冲区分配失败视为致命错误，直接 panic
+        self.table
+            .push(rb)
+            .expect("Critical error: Failed to allocate memory buffer")
     }
 }
 
-/// 实现 buffer 的读取、大小获取与销毁
+/// 插件侧调用：缓冲区操作实现
 impl vtx::api::stream_io::HostBuffer for StreamContext {
     fn size(&mut self, resource: Resource<RealBuffer>) -> u64 {
-        self.table.get(&resource)
+        self.table
+            .get(&resource)
             .map(|b| b.inner.get_size())
             .unwrap_or(0)
     }
 
     fn read(&mut self, resource: Resource<RealBuffer>, offset: u64, max_bytes: u64) -> Vec<u8> {
         let mut chunk = vec![0u8; max_bytes as usize];
-        // 获取可变引用进行读取
+
         let read_len = if let Ok(buffer) = self.table.get_mut(&resource) {
             buffer.inner.read_at(offset, &mut chunk)
         } else {
@@ -87,14 +98,14 @@ impl vtx::api::stream_io::HostBuffer for StreamContext {
     }
 
     fn drop(&mut self, resource: Resource<RealBuffer>) -> wasmtime::Result<()> {
-        // 关键修复：显式映射错误类型，确保符合函数签名的 Result 类型
-        self.table.delete(resource)
+        self.table
+            .delete(resource)
             .map(|_| ())
             .map_err(|e| anyhow::anyhow!(e))
     }
 }
 
-/// 实现 SQL 执行接口
+/// 插件侧调用：执行 SQL 语句
 impl vtx::api::sql::Host for StreamContext {
     fn execute(
         &mut self,
@@ -123,7 +134,9 @@ impl vtx::api::sql::Host for StreamContext {
         let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
         let mut rows_json = Vec::new();
-        let mut rows = stmt.query(param_refs.as_slice()).map_err(|e| e.to_string())?;
+        let mut rows = stmt
+            .query(param_refs.as_slice())
+            .map_err(|e| e.to_string())?;
 
         while let Some(row) = rows.next().map_err(|e| e.to_string())? {
             let mut obj = Map::new();
@@ -134,7 +147,9 @@ impl vtx::api::sql::Host for StreamContext {
                     rusqlite::types::ValueRef::Real(f) => serde_json::Number::from_f64(f)
                         .map(Value::Number)
                         .unwrap_or(Value::Null),
-                    rusqlite::types::ValueRef::Text(t) => Value::String(String::from_utf8_lossy(t).into_owned()),
+                    rusqlite::types::ValueRef::Text(t) => {
+                        Value::String(String::from_utf8_lossy(t).into_owned())
+                    }
                     rusqlite::types::ValueRef::Blob(_) => Value::String("<BLOB>".into()),
                 };
                 obj.insert(col_name.clone(), json_val);
@@ -146,12 +161,15 @@ impl vtx::api::sql::Host for StreamContext {
     }
 }
 
-/// 辅助函数：转换 Wasm 类型到 SQLite 参数
+/// 工具函数：将插件传入的参数类型转换为 rusqlite 支持的 ToSql trait 对象
 fn convert_params(params: &[vtx::api::sql::DbValue]) -> Vec<Box<dyn ToSql>> {
-    params.iter().map(|p| match p {
-        api::sql::DbValue::Text(s) => Box::new(s.clone()) as Box<dyn ToSql>,
-        api::sql::DbValue::Integer(i) => Box::new(*i),
-        api::sql::DbValue::Real(f) => Box::new(*f),
-        api::sql::DbValue::NullVal => Box::new(rusqlite::types::Null),
-    }).collect()
+    params
+        .iter()
+        .map(|p| match p {
+            api::sql::DbValue::Text(s) => Box::new(s.clone()) as Box<dyn ToSql>,
+            api::sql::DbValue::Integer(i) => Box::new(*i),
+            api::sql::DbValue::Real(f) => Box::new(*f),
+            api::sql::DbValue::NullVal => Box::new(rusqlite::types::Null),
+        })
+        .collect()
 }

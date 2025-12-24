@@ -7,7 +7,7 @@ use std::io::{Read, Seek, SeekFrom};
 use tokio::fs::File as TokioFile;
 use tokio_util::io::ReaderStream;
 
-use crate::common::buffer::{RealBuffer, BufferType};
+use crate::common::buffer::{BufferType, RealBuffer};
 
 /// 流式协议处理层，支持文件与内存缓冲区的响应构建
 pub struct StreamProtocolLayer;
@@ -16,9 +16,7 @@ impl StreamProtocolLayer {
     /// 主入口，根据资源类型构建 HTTP 响应
     pub async fn process(buffer: RealBuffer, headers: &HeaderMap) -> Response {
         match buffer.inner {
-            BufferType::File(file) => {
-                Self::handle_file(file, buffer.path_hint, headers).await
-            }
+            BufferType::File(file) => Self::handle_file(file, buffer.path_hint, headers).await,
             BufferType::Memory(cursor) => {
                 Self::handle_memory(cursor, buffer.mime_override, headers).await
             }
@@ -75,8 +73,14 @@ impl StreamProtocolLayer {
         let (start, end) = match range_header {
             Some(range) if range.starts_with("bytes=") => {
                 let parts: Vec<&str> = range["bytes=".len()..].split('-').collect();
-                let s = parts.get(0).and_then(|s| s.parse::<u64>().ok()).unwrap_or(0);
-                let e = parts.get(1).and_then(|s| s.parse::<u64>().ok()).unwrap_or(file_size - 1);
+                let s = parts
+                    .get(0)
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(0);
+                let e = parts
+                    .get(1)
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(file_size - 1);
                 (s, e.min(file_size - 1))
             }
             _ => (0, file_size - 1),

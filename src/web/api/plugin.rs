@@ -27,11 +27,7 @@ pub async fn handler(
                 (StatusCode::NOT_FOUND, "Resource not found").into_response()
             } else {
                 tracing::error!("[handler] 插件执行失败: {}", msg);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Worker execution failed",
-                )
-                    .into_response()
+                (StatusCode::INTERNAL_SERVER_ERROR, "Worker execution failed").into_response()
             }
         }
     }
