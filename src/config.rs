@@ -42,7 +42,7 @@ impl Settings {
             .set_default("database.url", "vtxdeo.db")?
             .set_default(
                 "plugins.location",
-                "target/wasm32-wasip1/release/vtx_demo_plugin.wasm",
+                "target/wasm32-wasip1/release/vtx_plugin_auth_basic.vtx",
             )?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))

@@ -38,3 +38,5 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 # 配置管理
 config = "0.14"
+
+vtx-format = { path = "../vtx-format" }

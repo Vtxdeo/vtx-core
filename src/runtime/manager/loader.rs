@@ -3,6 +3,7 @@ use crate::runtime::{
     host_impl::Plugin,
 };
 use crate::storage::VideoRegistry;
+use anyhow::Context;
 use std::path::Path;
 use tracing::{debug, error, info};
 use wasmtime::{
@@ -16,18 +17,21 @@ pub struct LoadResult {
     pub component: Component,
 }
 
-/// 加载并迁移插件：编译 -> 实例化 -> 获取元数据 -> 校验路径 -> 执行迁移 -> 注册资源
+/// 加载并迁移插件：
+/// - 仅支持 `.vtx` 包
+/// - 解包 `.vtx` -> component bytes（通过 vtx-format）
+/// - 编译 component -> 实例化 -> 获取元数据 -> 校验路径 -> 执行迁移 -> 注册资源
 pub fn load_and_migrate(
     engine: &Engine,
     registry: &VideoRegistry,
     linker: &Linker<StreamContext>,
-    wasm_path: &Path,
+    vtx_path: &Path,
 ) -> anyhow::Result<LoadResult> {
-    // 编译插件组件
-    let component = Component::from_file(engine, wasm_path)?;
+    enforce_vtx_only(vtx_path)?;
 
-    // 创建临时 Store 实例以提取插件元数据
-    // 使用 Root 权限以允许插件执行迁移逻辑
+    let component = load_component_from_vtx(engine, vtx_path)?;
+
+    // Root 权限允许迁移
     let ctx = StreamContext::new_secure(
         registry.clone(),
         wasmtime::StoreLimitsBuilder::new().build(),
@@ -37,12 +41,10 @@ pub fn load_and_migrate(
 
     let (plugin, _) = Plugin::instantiate(&mut store, &component, linker)?;
 
-    // 提取插件元信息
     let manifest = plugin.call_get_manifest(&mut store)?;
     let plugin_id = manifest.id;
 
-    // 校验插件 ID 与路径的一致性，防止路径冲突
-    if !registry.verify_installation(&plugin_id, wasm_path)? {
+    if !registry.verify_installation(&plugin_id, vtx_path)? {
         return Err(anyhow::anyhow!(
             "Plugin ID '{}' is already registered with a different path. Installation aborted.",
             plugin_id
@@ -54,7 +56,6 @@ pub fn load_and_migrate(
         plugin_id, manifest.version, manifest.name
     );
 
-    // 处理数据库迁移
     let declared_resources = plugin.call_get_resources(&mut store)?;
     let migrations = plugin.call_get_migrations(&mut store)?;
     let current_ver = registry.get_plugin_version(&plugin_id);
@@ -66,6 +67,7 @@ pub fn load_and_migrate(
             current_ver,
             migrations.len()
         );
+
         let conn = registry.get_conn()?;
         for (idx, sql) in migrations.iter().enumerate().skip(current_ver) {
             debug!(
@@ -83,13 +85,9 @@ pub fn load_and_migrate(
             }
         }
 
-        // 注册资源（如表名）到系统注册表
         for table_name in declared_resources {
             registry.register_resource(&plugin_id, "TABLE", &table_name);
-            info!(
-                "[plugin/resource] Registered table resource: {}",
-                table_name
-            );
+            info!("[plugin/resource] Registered table resource: {}", table_name);
         }
 
         registry.set_plugin_version(&plugin_id, migrations.len());
@@ -107,5 +105,37 @@ pub fn load_and_migrate(
     Ok(LoadResult {
         plugin_id,
         component,
+    })
+}
+
+fn enforce_vtx_only(path: &Path) -> anyhow::Result<()> {
+    let ext_ok = path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("vtx"))
+        .unwrap_or(false);
+
+    if !ext_ok {
+        return Err(anyhow::anyhow!(
+            "Only .vtx plugin is allowed, got: {}",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+fn load_component_from_vtx(engine: &Engine, path: &Path) -> anyhow::Result<Component> {
+    let bytes = std::fs::read(path)
+        .with_context(|| format!("failed to read plugin package: {}", path.display()))?;
+
+    let (version, component_bytes) = vtx_format::decode(&bytes)
+        .with_context(|| format!("invalid vtx package: {}", path.display()))?;
+
+    Component::new(engine, component_bytes).with_context(|| {
+        format!(
+            "failed to compile component from vtx (version {}): {}",
+            version,
+            path.display()
+        )
     })
 }
