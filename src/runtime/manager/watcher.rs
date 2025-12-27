@@ -1,33 +1,20 @@
 use notify::{Event, RecursiveMode, Watcher};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::sync::mpsc::RecvTimeoutError;
+use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
-use wasmtime::{
-    component::{Component, InstancePre, Linker},
-    Engine,
-};
 
-use super::loader;
-use crate::runtime::context::StreamContext;
-use crate::storage::VideoRegistry;
+use super::PluginManager;
 
-/// 热更新上下文，包含插件引擎、链接器、注册表及共享状态
-pub struct HotReloadContext {
-    pub engine: Engine,
-    pub linker: Linker<StreamContext>,
-    pub registry: VideoRegistry,
-    pub wasm_path: PathBuf,
-    // 共享状态，用于支持热更新替换
-    pub component: Arc<RwLock<Component>>,
-    pub instance_pre: Arc<RwLock<InstancePre<StreamContext>>>,
-    pub current_id: Arc<RwLock<String>>,
-}
-
-/// 启动监听线程，监控插件文件变更
-pub fn spawn_watcher(ctx: HotReloadContext) {
+/// 启动监听线程，监控插件目录变更
+///
+/// 该实现采用了基于时间窗口的防抖动机制（Debounce）：
+/// 1. 聚合短时间内的多次 Modify 事件，避免重复重载。
+/// 2. 只有当文件在指定时间窗口内没有新的变更时，才触发加载逻辑。
+/// 3. Remove 事件拥有最高优先级，会立即取消挂起的重载任务。
+pub fn spawn_watcher(manager: PluginManager) {
     std::thread::spawn(move || {
-        let path = ctx.wasm_path.clone();
         let (tx, rx) = std::sync::mpsc::channel();
 
         let mut watcher = match notify::recommended_watcher(tx) {
@@ -38,61 +25,93 @@ pub fn spawn_watcher(ctx: HotReloadContext) {
             }
         };
 
-        let parent = path.parent().unwrap_or(Path::new("."));
-        if let Err(e) = watcher.watch(parent, RecursiveMode::NonRecursive) {
-            error!("[HotReload] Failed to watch directory: {}", e);
+        if let Err(e) = watcher.watch(&manager.plugin_dir, RecursiveMode::NonRecursive) {
+            error!(
+                "[HotReload] Failed to watch plugin directory {:?}: {}",
+                manager.plugin_dir, e
+            );
             return;
         }
 
-        info!("[HotReload] Watching plugin file: {:?}", path);
+        info!(
+            "[HotReload] Watching plugin directory: {:?}",
+            manager.plugin_dir
+        );
 
-        // 监听文件事件
-        for res in rx {
-            match res {
-                Ok(Event { kind, paths, .. }) => {
-                    // 判断是否目标插件文件发生变动
-                    if paths.iter().any(|p| p.file_name() == path.file_name()) {
-                        handle_change(&ctx, &path, &kind);
-                    }
+        // 防抖动时间窗口：500ms
+        let debounce_duration = Duration::from_millis(500);
+
+        let mut pending_events: HashMap<PathBuf, Instant> = HashMap::new();
+
+        loop {
+            match rx.recv_timeout(Duration::from_millis(100)) {
+                Ok(res) => match res {
+                    Ok(event) => handle_fs_event(&mut pending_events, &manager, event),
+                    Err(e) => error!("[HotReload] File watch error: {}", e),
+                },
+                Err(RecvTimeoutError::Timeout) => {}
+                Err(RecvTimeoutError::Disconnected) => {
+                    error!("[HotReload] Watcher channel disconnected. Stopping thread.");
+                    break;
                 }
-                Err(e) => error!("[HotReload] File watch error: {}", e),
             }
+
+            // 检查是否有挂起的任务达到了防抖时间阈值
+            process_pending_events(&manager, &mut pending_events, debounce_duration);
         }
     });
 }
 
-/// 处理插件文件变更事件，执行热更新
-fn handle_change(ctx: &HotReloadContext, path: &Path, kind: &notify::EventKind) {
-    if !path.exists() {
-        warn!("[HotReload] Plugin file not found. Skipping reload.");
+/// 处理文件系统原始事件，更新挂起队列
+fn handle_fs_event(
+    pending_events: &mut HashMap<PathBuf, Instant>,
+    manager: &PluginManager,
+    event: Event,
+) {
+    for path in event.paths {
+        if path.extension().map_or(false, |e| e == "vtx") {
+            if event.kind.is_remove() {
+                if pending_events.remove(&path).is_some() {
+                    info!(
+                        "[HotReload] Pending reload cancelled for removed file: {:?}",
+                        path
+                    );
+                }
+                manager.uninstall_by_path(&path);
+            } else if event.kind.is_create() || event.kind.is_modify() {
+                pending_events.insert(path, Instant::now());
+            }
+        }
+    }
+}
+
+/// 扫描挂起队列，执行满足条件的重载任务
+fn process_pending_events(
+    manager: &PluginManager,
+    pending_events: &mut HashMap<PathBuf, Instant>,
+    debounce: Duration,
+) {
+    if pending_events.is_empty() {
         return;
     }
 
-    if kind.is_modify() || kind.is_create() {
-        info!("[HotReload] Change detected. Attempting to reload plugin...");
+    let now = Instant::now();
 
-        // 等待写入完成，避免读取到未完整写入的文件
-        std::thread::sleep(Duration::from_millis(200));
+    let paths_to_reload: Vec<PathBuf> = pending_events
+        .iter()
+        .filter(|(_, &last_update)| now.duration_since(last_update) > debounce)
+        .map(|(path, _)| path.clone())
+        .collect();
 
-        // 加载新插件并执行迁移
-        match loader::load_and_migrate(&ctx.engine, &ctx.registry, &ctx.linker, path) {
-            Ok(result) => {
-                match ctx.linker.instantiate_pre(&result.component) {
-                    Ok(new_pre) => {
-                        // 更新热更新上下文的共享状态
-                        *ctx.component.write().unwrap() = result.component;
-                        *ctx.instance_pre.write().unwrap() = new_pre;
-                        *ctx.current_id.write().unwrap() = result.plugin_id.clone();
+    for path in paths_to_reload {
+        pending_events.remove(&path);
 
-                        info!(
-                            "[HotReload] Plugin reloaded successfully: {}",
-                            result.plugin_id
-                        );
-                    }
-                    Err(e) => error!("[HotReload] Failed to link plugin instance: {}", e),
-                }
-            }
-            Err(e) => error!("[HotReload] Failed to load/migrate plugin: {}", e),
+        info!(
+            "[HotReload] Change stabilized. Reloading plugin: {:?}",
+            path
+        );
+        if let Err(e) = manager.load_one(&path) {
+            error!("[HotReload] Failed to reload plugin {:?}: {}", path, e);
         }
     }
 }

@@ -11,9 +11,10 @@ use wasmtime::{
     Engine,
 };
 
-/// 表示插件加载的结果，包括插件 ID 和已编译的组件
+/// 表示插件加载的结果，包括插件 ID、Manifest 和已编译的组件
 pub struct LoadResult {
     pub plugin_id: String,
+    pub manifest: crate::runtime::host_impl::api::types::Manifest,
     pub component: Component,
 }
 
@@ -44,7 +45,7 @@ pub fn load_and_migrate(
     let (plugin, _) = Plugin::instantiate(&mut store, &component, linker)?;
 
     let manifest = plugin.call_get_manifest(&mut store)?;
-    let plugin_id = manifest.id;
+    let plugin_id = manifest.id.clone();
 
     if !registry.verify_installation(&plugin_id, vtx_path)? {
         return Err(anyhow::anyhow!(
@@ -75,7 +76,9 @@ pub fn load_and_migrate(
 
         // 开启数据库事务，确保迁移操作的原子性
         // 若中途失败，所有已执行的 SQL 将自动回滚，防止数据库处于损坏状态
-        let tx = conn.transaction().context("Failed to start database transaction")?;
+        let tx = conn
+            .transaction()
+            .context("Failed to start database transaction")?;
 
         for (idx, sql) in migrations.iter().enumerate().skip(current_ver) {
             debug!(
@@ -97,12 +100,16 @@ pub fn load_and_migrate(
         }
 
         // 提交事务
-        tx.commit().context("Failed to commit migration transaction")?;
+        tx.commit()
+            .context("Failed to commit migration transaction")?;
 
         // 迁移成功后注册资源表
         for table_name in declared_resources {
             registry.register_resource(&plugin_id, "TABLE", &table_name);
-            info!("[plugin/resource] Registered table resource: {}", table_name);
+            info!(
+                "[plugin/resource] Registered table resource: {}",
+                table_name
+            );
         }
 
         // 更新版本号
@@ -120,6 +127,7 @@ pub fn load_and_migrate(
 
     Ok(LoadResult {
         plugin_id,
+        manifest,
         component,
     })
 }

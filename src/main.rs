@@ -5,7 +5,7 @@ mod storage;
 mod web;
 
 use axum::{
-    routing::{delete, get, post},
+    routing::{any, delete, get, post},
     Router,
 };
 use std::sync::Arc;
@@ -33,7 +33,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    info!("[Startup] vtxdeo Core V0.1.2 initializing...");
+    info!("[Startup] vtxdeo Core V0.1.3 initializing...");
 
     let settings = Settings::new().expect("Failed to load config");
     info!(
@@ -72,9 +72,6 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     let engine = wasmtime::Engine::new(&wasm_config)?;
-
-    // 构建全局 Linker，注册宿主函数
-    // 这一步只在启动时执行一次
     let mut linker = Linker::<runtime::context::StreamContext>::new(&engine);
     wasmtime_wasi::add_to_linker_sync(&mut linker)?;
     api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
@@ -83,7 +80,6 @@ async fn main() -> anyhow::Result<()> {
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
 
     // 初始化插件管理器
-    // 传入 linker 以支持在加载阶段进行预编译 (Pre-linking)
     let plugin_manager = PluginManager::new(
         engine.clone(),
         settings.plugins.location.clone(),
@@ -102,6 +98,7 @@ async fn main() -> anyhow::Result<()> {
     // 路由定义
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
+        // 管理后台路由 (优先级最高)
         .nest(
             "/admin",
             Router::new()
@@ -113,7 +110,9 @@ async fn main() -> anyhow::Result<()> {
                     auth_middleware,
                 )),
         )
-        .route("/api/video/*path", get(plugin::handler))
+        // 插件网关路由 (Catch-All)
+        // 任何未被匹配的请求都会进入 gateway_handler，由它分发给具体插件
+        .route("/*path", any(plugin::gateway_handler))
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(CatchPanicLayer::new())

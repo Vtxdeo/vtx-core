@@ -15,6 +15,7 @@ pub struct ScanRequest {
 
 #[derive(Deserialize)]
 pub struct UninstallParams {
+    pub plugin_id: String,
     pub keep_data: bool,
 }
 
@@ -61,10 +62,13 @@ pub async fn uninstall_handler(
     State(state): State<Arc<AppState>>,
     Query(params): Query<UninstallParams>,
 ) -> AxumJson<serde_json::Value> {
-    match state.plugin_manager.uninstall(params.keep_data) {
+    match state
+        .plugin_manager
+        .uninstall(&params.plugin_id, params.keep_data)
+    {
         Ok(_) => AxumJson(serde_json::json!({
             "status": "success",
-            "message": "uninstalled"
+            "message": format!("Plugin '{}' uninstalled", params.plugin_id)
         })),
         Err(e) => AxumJson(serde_json::json!({
             "status": "error",

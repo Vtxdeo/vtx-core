@@ -1,161 +1,277 @@
 pub mod loader;
 pub mod watcher;
 
-use std::path::PathBuf;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime::Engine;
 
 use crate::runtime::context::{SecurityPolicy, StreamContext};
 use crate::runtime::host_impl::api::auth_types::UserContext;
+use crate::runtime::host_impl::api::types::Manifest;
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
 
-/// 插件管理器：负责插件加载、验证调用、热更新与卸载管理
+pub struct PluginRuntime {
+    pub id: String,
+    pub manifest: Manifest,
+    pub instance_pre: InstancePre<StreamContext>,
+    #[allow(dead_code)]
+    pub component: Component,
+    pub source_path: PathBuf,
+}
+
 #[derive(Clone)]
 pub struct PluginManager {
     engine: Engine,
-    instance_pre: Arc<RwLock<InstancePre<StreamContext>>>,
-    component: Arc<RwLock<Component>>,
-    current_id: Arc<RwLock<String>>,
     linker: Linker<StreamContext>,
-    wasm_path: PathBuf,
+    pub plugin_dir: PathBuf,
     registry: VideoRegistry,
+    plugins: Arc<RwLock<HashMap<String, Arc<PluginRuntime>>>>,
+    routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
 }
 
 impl PluginManager {
-    /// 初始化插件管理器并加载插件
     pub fn new(
         engine: Engine,
-        wasm_path: PathBuf,
+        mut plugin_dir: PathBuf,
         registry: VideoRegistry,
         linker: Linker<StreamContext>,
     ) -> anyhow::Result<Self> {
-        info!("[PluginManager] Initializing plugin manager");
-
-        if !wasm_path.exists() {
-            return Err(anyhow::anyhow!(
-                "Plugin binary not found at path: {:?}",
-                wasm_path
-            ));
+        if plugin_dir.is_file() {
+            warn!(
+                "[PluginManager] Configured path '{:?}' is a file, but a directory is expected.",
+                plugin_dir
+            );
+            if let Some(parent) = plugin_dir.parent() {
+                warn!(
+                    "[PluginManager] Automatically adjusting plugin directory to: {:?}",
+                    parent
+                );
+                plugin_dir = parent.to_path_buf();
+            } else {
+                return Err(anyhow::anyhow!("Invalid plugin directory path"));
+            }
         }
 
-        // 使用 Root 策略加载插件，完成初始化与数据库迁移等操作
-        let load_result = loader::load_and_migrate(&engine, &registry, &linker, &wasm_path)?;
-
-        let instance_pre = linker.instantiate_pre(&load_result.component)?;
-
         info!(
-            "[PluginManager] Plugin loaded successfully. ID: {}",
-            load_result.plugin_id
+            "[PluginManager] Initializing plugin manager at: {:?}",
+            plugin_dir
         );
+
+        if !plugin_dir.exists() {
+            std::fs::create_dir_all(&plugin_dir)?;
+        }
 
         let manager = Self {
             engine: engine.clone(),
-            instance_pre: Arc::new(RwLock::new(instance_pre)),
-            component: Arc::new(RwLock::new(load_result.component)),
-            current_id: Arc::new(RwLock::new(load_result.plugin_id)),
             linker,
-            wasm_path,
+            plugin_dir: plugin_dir.clone(),
             registry,
+            plugins: Arc::new(RwLock::new(HashMap::new())),
+            routes: Arc::new(RwLock::new(Vec::new())),
         };
 
-        manager.start_watcher();
+        manager.load_all_plugins()?;
+
+        watcher::spawn_watcher(manager.clone());
 
         Ok(manager)
     }
 
-    /// 返回预编译实例（用于高性能运行）
-    pub fn get_instance_pre(&self) -> InstancePre<StreamContext> {
-        self.instance_pre.read().unwrap().clone()
+    fn load_all_plugins(&self) -> anyhow::Result<()> {
+        info!("[PluginManager] Scanning plugins in: {:?}", self.plugin_dir);
+        let entries = std::fs::read_dir(&self.plugin_dir).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to read plugin directory '{:?}': {}",
+                self.plugin_dir,
+                e
+            )
+        })?;
+
+        let mut loaded_count = 0;
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().map_or(false, |e| e == "vtx") {
+                match self.load_one(&path) {
+                    Ok(_) => loaded_count += 1,
+                    Err(e) => error!("[PluginManager] Failed to load {}: {}", path.display(), e),
+                }
+            }
+        }
+
+        if loaded_count == 0 {
+            warn!("[PluginManager] No .vtx plugins found in directory.");
+        } else {
+            info!(
+                "[PluginManager] Loaded {} plugins successfully.",
+                loaded_count
+            );
+        }
+
+        Ok(())
     }
 
-    /// 返回插件组件（原始组件对象）
-    #[allow(dead_code)]
-    pub fn get_component(&self) -> Component {
-        self.component.read().unwrap().clone()
+    pub fn load_one(&self, path: &Path) -> anyhow::Result<()> {
+        let load_result =
+            loader::load_and_migrate(&self.engine, &self.registry, &self.linker, path)?;
+        let instance_pre = self.linker.instantiate_pre(&load_result.component)?;
+
+        let runtime = Arc::new(PluginRuntime {
+            id: load_result.plugin_id.clone(),
+            manifest: load_result.manifest.clone(),
+            instance_pre,
+            component: load_result.component,
+            source_path: path.to_path_buf(),
+        });
+
+        self.register_plugin(runtime)
     }
 
-    /// 返回当前插件的唯一 ID
-    pub fn get_plugin_id(&self) -> String {
-        self.current_id.read().unwrap().clone()
+    fn register_plugin(&self, runtime: Arc<PluginRuntime>) -> anyhow::Result<()> {
+        let mut plugins_lock = self.plugins.write().unwrap();
+        let mut routes_lock = self.routes.write().unwrap();
+
+        let new_entrypoint = &runtime.manifest.entrypoint;
+        let new_id = &runtime.id;
+
+        for existing in routes_lock.iter() {
+            if existing.manifest.entrypoint == *new_entrypoint && existing.id != *new_id {
+                return Err(anyhow::anyhow!(
+                    "Route conflict: '{}' is already owned by plugin '{}'. Installation of '{}' aborted.",
+                    new_entrypoint,
+                    existing.id,
+                    new_id
+                ));
+            }
+        }
+
+        plugins_lock.insert(new_id.clone(), runtime.clone());
+
+        routes_lock.retain(|p| p.id != *new_id);
+        routes_lock.push(runtime.clone());
+        routes_lock.sort_by(|a, b| {
+            b.manifest
+                .entrypoint
+                .len()
+                .cmp(&a.manifest.entrypoint.len())
+        });
+
+        info!(
+            "[Register] Plugin '{}' registered at route '{}'",
+            new_id, new_entrypoint
+        );
+
+        Ok(())
     }
 
-    /// 使用插件进行身份验证逻辑执行
+    pub fn match_route(&self, path: &str) -> Option<(Arc<PluginRuntime>, String)> {
+        let routes = self.routes.read().unwrap();
+        for plugin in routes.iter() {
+            let prefix = &plugin.manifest.entrypoint;
+            if path.starts_with(prefix) {
+                let rest = &path[prefix.len()..];
+                if rest.is_empty() || rest.starts_with('/') {
+                    return Some((plugin.clone(), rest.to_string()));
+                }
+            }
+        }
+        None
+    }
+
+    pub fn uninstall_by_path(&self, path: &Path) {
+        let target_id = {
+            let plugins = self.plugins.read().unwrap();
+            plugins
+                .values()
+                .find(|p| p.source_path == path)
+                .map(|p| p.id.clone())
+        };
+
+        if let Some(id) = target_id {
+            info!(
+                "[Watcher] Detected removal of '{}', uninstalling plugin '{}'...",
+                path.display(),
+                id
+            );
+            if let Err(e) = self.uninstall(&id, true) {
+                error!("[Watcher] Failed to uninstall plugin '{}': {}", id, e);
+            }
+        }
+    }
+
+    pub fn uninstall(&self, plugin_id: &str, keep_data: bool) -> anyhow::Result<()> {
+        {
+            let mut plugins_lock = self.plugins.write().unwrap();
+            if plugins_lock.remove(plugin_id).is_none() {
+                return Err(anyhow::anyhow!("Plugin not found: {}", plugin_id));
+            }
+            let mut routes_lock = self.routes.write().unwrap();
+            routes_lock.retain(|p| p.id != plugin_id);
+        }
+
+        if !keep_data {
+            self.registry.nuke_plugin(plugin_id)?;
+            self.registry.release_installation(plugin_id)?;
+        }
+
+        info!("[Uninstall] Plugin '{}' uninstalled.", plugin_id);
+        Ok(())
+    }
+
     pub fn verify_identity(&self, headers: &axum::http::HeaderMap) -> Result<UserContext, u16> {
         let wit_headers: Vec<(String, String)> = headers
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // 获取预编译实例，避免重复构建
-        let instance_pre = self.get_instance_pre();
+        let plugins: Vec<Arc<PluginRuntime>> =
+            { self.plugins.read().unwrap().values().cloned().collect() };
 
-        // 设置内存资源限制
+        for plugin_runtime in plugins {
+            match self.invoke_authenticate(&plugin_runtime, &wit_headers) {
+                Ok(user) => return Ok(user),
+                Err(code) => {
+                    if code == 401 || code == 403 {
+                        continue;
+                    }
+                }
+            }
+        }
+        Err(401)
+    }
+
+    fn invoke_authenticate(
+        &self,
+        runtime: &PluginRuntime,
+        headers: &[(String, String)],
+    ) -> Result<UserContext, u16> {
         let limits = wasmtime::StoreLimitsBuilder::new()
             .instances(1)
-            .memory_size(10 * 1024 * 1024) // 限制最大 10MB 内存
+            .memory_size(10 * 1024 * 1024)
             .build();
 
-        // 初始化 Store 并应用限制与安全策略（禁止文件访问和 DB 写）
         let ctx =
             StreamContext::new_secure(self.registry.clone(), limits, SecurityPolicy::Restricted);
-
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);
 
-        // 实例化插件
-        let instance = instance_pre.instantiate(&mut store).map_err(|e| {
-            error!("[Auth] Failed to instantiate plugin: {}", e);
+        let instance = runtime.instance_pre.instantiate(&mut store).map_err(|e| {
+            error!("[Auth] Instantiation failed: {}", e);
             500u16
         })?;
 
-        // 绑定插件接口
-        let plugin = Plugin::new(&mut store, &instance).map_err(|e| {
-            error!("[Auth] Failed to bind plugin interface: {}", e);
-            500u16
-        })?;
+        let plugin = Plugin::new(&mut store, &instance).map_err(|_| 500u16)?;
 
-        // 执行插件身份认证逻辑
         plugin
-            .call_authenticate(&mut store, &wit_headers)
+            .call_authenticate(&mut store, headers)
             .map_err(|e| {
-                error!("[Auth] Plugin authentication invocation failed: {}", e);
+                error!("[Auth] Call failed: {}", e);
                 500u16
             })?
             .map_err(|code| code)
-    }
-
-    /// 启动热更新文件监听器，监控插件文件变更
-    fn start_watcher(&self) {
-        let ctx = watcher::HotReloadContext {
-            engine: self.engine.clone(),
-            linker: self.linker.clone(),
-            registry: self.registry.clone(),
-            wasm_path: self.wasm_path.clone(),
-            component: self.component.clone(),
-            instance_pre: self.instance_pre.clone(),
-            current_id: self.current_id.clone(),
-        };
-
-        watcher::spawn_watcher(ctx);
-    }
-
-    /// 卸载插件，根据 `keep_data` 决定是否保留注册表中的相关数据
-    pub fn uninstall(&self, keep_data: bool) -> anyhow::Result<()> {
-        let plugin_id = self.get_plugin_id();
-        let disabled_path = self.wasm_path.with_extension("wasm.disabled");
-
-        if self.wasm_path.exists() {
-            std::fs::rename(&self.wasm_path, &disabled_path)?;
-        }
-
-        if !keep_data {
-            self.registry.nuke_plugin(&plugin_id)?;
-            self.registry.release_installation(&plugin_id)?;
-        }
-
-        Ok(())
     }
 }
