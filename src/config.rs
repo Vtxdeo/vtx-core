@@ -25,10 +25,12 @@ pub struct DatabaseSettings {
     pub url: String,
 }
 
-/// 插件配置（WASM 插件文件位置）
+/// 插件配置（WASM 插件文件位置及运行时限制）
 #[derive(Debug, Deserialize, Clone)]
 pub struct PluginSettings {
     pub location: PathBuf,
+    /// 单个插件实例允许使用的最大内存（单位：MB），默认 100MB
+    pub max_memory_mb: u64,
 }
 
 impl Settings {
@@ -44,6 +46,8 @@ impl Settings {
                 "plugins.location",
                 "target/wasm32-wasip1/release/vtx_plugin_auth_basic.vtx",
             )?
+            // 默认限制 100MB 内存
+            .set_default("plugins.max_memory_mb", 100)?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
             // 环境变量支持（如 VTX_SERVER__PORT=8080）

@@ -13,9 +13,11 @@ pub struct PluginExecutor;
 impl PluginExecutor {
     /// 执行插件的 `handle` 方法
     ///
-    /// - 参数 `state`: 全局应用状态，包含引擎与组件。
+    /// - 参数 `state`: 全局应用状态，包含引擎、组件及全局配置。
     /// - 参数 `path_param`: API 路径参数。
     /// - 返回值: 成功时返回缓冲区与 HTTP 状态码，失败返回错误描述。
+    ///
+    /// IO 复杂度：涉及 Wasm 实例化和潜在的插件内部 IO 操作，性能受 max_memory_mb 配置影响。
     pub async fn execute(
         state: &Arc<AppState>,
         path_param: String,
@@ -24,12 +26,15 @@ impl PluginExecutor {
         let registry = state.registry.clone();
         let instance_pre = state.plugin_manager.get_instance_pre();
 
+        // 从全局配置中读取内存限制 (MB)，并转换为字节
+        let memory_limit_bytes = state.config.plugins.max_memory_mb as usize * 1024 * 1024;
+
         // 异步任务中执行阻塞的 Wasm 调用
         tokio::task::spawn_blocking(move || {
             // 设置单次执行资源上限
-            // 注意：当启用 Pooling Allocator 时，memory_size 必须小于等于 pool 配置的 max_memory_size
+            // 该限制由 config.plugins.max_memory_mb 决定，避免硬编码导致大内存插件 OOM
             let limits = wasmtime::StoreLimitsBuilder::new()
-                .memory_size(100 * 1024 * 1024)
+                .memory_size(memory_limit_bytes)
                 .instances(5)
                 .tables(1000)
                 .build();

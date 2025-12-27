@@ -1,3 +1,4 @@
+use crate::config::Settings;
 use crate::runtime::manager::PluginManager;
 use crate::storage::VideoRegistry;
 use wasmtime::Engine;
@@ -10,4 +11,5 @@ pub struct AppState {
     pub engine: Engine,
     pub plugin_manager: PluginManager,
     pub registry: VideoRegistry,
+    pub config: Settings,
 }

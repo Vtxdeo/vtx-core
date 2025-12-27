@@ -21,6 +21,8 @@ pub struct LoadResult {
 /// - 仅支持 `.vtx` 包
 /// - 解包 `.vtx` -> component bytes（通过 vtx-format）
 /// - 编译 component -> 实例化 -> 获取元数据 -> 校验路径 -> 执行迁移 -> 注册资源
+///
+/// IO 复杂度：涉及文件读取、Wasm 编译及多次数据库交互，需注意 I/O 延迟。
 pub fn load_and_migrate(
     engine: &Engine,
     registry: &VideoRegistry,
@@ -68,28 +70,42 @@ pub fn load_and_migrate(
             migrations.len()
         );
 
-        let conn = registry.get_conn()?;
+        // 获取可变连接以启动事务
+        let mut conn = registry.get_conn()?;
+
+        // 开启数据库事务，确保迁移操作的原子性
+        // 若中途失败，所有已执行的 SQL 将自动回滚，防止数据库处于损坏状态
+        let tx = conn.transaction().context("Failed to start database transaction")?;
+
         for (idx, sql) in migrations.iter().enumerate().skip(current_ver) {
             debug!(
                 "[plugin/migration] Executing migration #{} for {}",
                 idx + 1,
                 plugin_id
             );
-            if let Err(e) = conn.execute(sql, []) {
+
+            // 使用事务句柄执行 SQL
+            if let Err(e) = tx.execute(sql, []) {
                 error!(
-                    "[plugin/migration] Migration failed at step {}: {}",
+                    "[plugin/migration] Migration failed at step {}: {}. Rolling back transaction.",
                     idx + 1,
                     e
                 );
+                // 此时直接返回错误，Transaction Drop 时会自动 Rollback
                 return Err(anyhow::anyhow!("Migration failed: {}", e));
             }
         }
 
+        // 提交事务
+        tx.commit().context("Failed to commit migration transaction")?;
+
+        // 迁移成功后注册资源表
         for table_name in declared_resources {
             registry.register_resource(&plugin_id, "TABLE", &table_name);
             info!("[plugin/resource] Registered table resource: {}", table_name);
         }
 
+        // 更新版本号
         registry.set_plugin_version(&plugin_id, migrations.len());
         info!(
             "[plugin/migration] Migration complete for plugin: {}",

@@ -33,12 +33,16 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
-    info!("[Startup] vtxdeo Core V0.1.1 initializing...");
+    info!("[Startup] vtxdeo Core V0.1.2 initializing...");
 
     let settings = Settings::new().expect("Failed to load config");
     info!(
         "[Config] Binding at {}:{}",
         settings.server.host, settings.server.port
+    );
+    info!(
+        "[Config] Max plugin memory: {} MB",
+        settings.plugins.max_memory_mb
     );
 
     // 基础设施初始化
@@ -52,9 +56,13 @@ async fn main() -> anyhow::Result<()> {
     pooling_strategy.max_unused_warm_slots(16);
 
     // 设置单个线性内存的最大页数
-    // Wasm 页大小为 64KB。100MB ≈ 1600 页
-    // 计算: 100 * 1024 * 1024 / 65536 = 1600
-    pooling_strategy.memory_pages(1600);
+    // Wasm 页大小为 64KB。
+    // 动态计算: (max_mb * 1024 * 1024) / 65536
+    let max_memory_bytes = settings.plugins.max_memory_mb * 1024 * 1024;
+    let max_wasm_pages = max_memory_bytes / 65536;
+
+    // 必须确保 Pooling Allocator 的预留空间 >= 实例请求的空间
+    pooling_strategy.memory_pages(max_wasm_pages);
 
     // 设置并发组件实例上限
     pooling_strategy.total_component_instances(100);
@@ -88,6 +96,7 @@ async fn main() -> anyhow::Result<()> {
         engine,
         plugin_manager,
         registry,
+        config: settings.clone(),
     });
 
     // 路由定义
