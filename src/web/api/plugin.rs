@@ -46,7 +46,10 @@ pub async fn gateway_handler(
 
     // 3. 处理响应
     match result {
-        Ok((buffer, _status_code)) => StreamProtocolLayer::process(buffer, &headers).await,
+        // 透传 status_code，确保插件可以返回 403, 500, 201 等状态码
+        Ok((buffer, status_code)) => {
+            StreamProtocolLayer::process(buffer, &headers, status_code).await
+        }
         Err(msg) => {
             if msg == "NO_CONTENT" {
                 (StatusCode::NOT_FOUND, "Resource not found").into_response()

@@ -1,6 +1,7 @@
 pub mod loader;
 pub mod watcher;
 
+use serde::Serialize;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -23,6 +24,16 @@ pub struct PluginRuntime {
     pub source_path: PathBuf,
 }
 
+/// 插件状态视图
+#[derive(Serialize)]
+pub struct PluginStatus {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub entrypoint: String,
+    pub source_path: String,
+}
+
 #[derive(Clone)]
 pub struct PluginManager {
     engine: Engine,
@@ -31,6 +42,8 @@ pub struct PluginManager {
     registry: VideoRegistry,
     plugins: Arc<RwLock<HashMap<String, Arc<PluginRuntime>>>>,
     routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
+    /// 鉴权提供者 ID
+    auth_provider: Option<String>,
 }
 
 impl PluginManager {
@@ -39,6 +52,7 @@ impl PluginManager {
         mut plugin_dir: PathBuf,
         registry: VideoRegistry,
         linker: Linker<StreamContext>,
+        auth_provider: Option<String>,
     ) -> anyhow::Result<Self> {
         if plugin_dir.is_file() {
             warn!(
@@ -72,6 +86,7 @@ impl PluginManager {
             registry,
             plugins: Arc::new(RwLock::new(HashMap::new())),
             routes: Arc::new(RwLock::new(Vec::new())),
+            auth_provider,
         };
 
         manager.load_all_plugins()?;
@@ -222,21 +237,56 @@ impl PluginManager {
         Ok(())
     }
 
+    /// 获取所有已加载插件的状态列表
+    pub fn list_plugins(&self) -> Vec<PluginStatus> {
+        let plugins = self.plugins.read().unwrap();
+        plugins
+            .values()
+            .map(|p| PluginStatus {
+                id: p.id.clone(),
+                name: p.manifest.name.clone(),
+                version: p.manifest.version.clone(),
+                entrypoint: p.manifest.entrypoint.clone(),
+                source_path: p.source_path.to_string_lossy().to_string(),
+            })
+            .collect()
+    }
+
     pub fn verify_identity(&self, headers: &axum::http::HeaderMap) -> Result<UserContext, u16> {
         let wit_headers: Vec<(String, String)> = headers
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        let plugins: Vec<Arc<PluginRuntime>> =
-            { self.plugins.read().unwrap().values().cloned().collect() };
+        // 性能优化：如果配置了 auth_provider，直接进行精确查找
+        if let Some(provider_id) = &self.auth_provider {
+            let plugins = self.plugins.read().unwrap();
+            if let Some(runtime) = plugins.get(provider_id) {
+                match self.invoke_authenticate(runtime, &wit_headers) {
+                    Ok(user) => return Ok(user),
+                    Err(code) => return Err(code),
+                }
+            } else {
+                warn!(
+                    "[Auth] Configured auth_provider '{}' not loaded.",
+                    provider_id
+                );
+                return Err(500);
+            }
+        } else {
+            // 默认模式：责任链遍历
+            let plugins: Vec<Arc<PluginRuntime>> =
+                { self.plugins.read().unwrap().values().cloned().collect() };
 
-        for plugin_runtime in plugins {
-            match self.invoke_authenticate(&plugin_runtime, &wit_headers) {
-                Ok(user) => return Ok(user),
-                Err(code) => {
-                    if code == 401 || code == 403 {
-                        continue;
+            for plugin_runtime in plugins {
+                match self.invoke_authenticate(&plugin_runtime, &wit_headers) {
+                    Ok(user) => return Ok(user),
+                    Err(code) => {
+                        // 401/403 表示该插件无法处理或拒绝，继续尝试下一个
+                        if code == 401 || code == 403 {
+                            continue;
+                        }
+                        return Err(code);
                     }
                 }
             }

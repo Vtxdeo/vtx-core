@@ -57,6 +57,18 @@ pub async fn list_handler(State(state): State<Arc<AppState>>) -> impl IntoRespon
     }
 }
 
+/// 列出所有已加载插件
+pub async fn list_plugins_handler(
+    State(state): State<Arc<AppState>>,
+) -> AxumJson<serde_json::Value> {
+    let plugins = state.plugin_manager.list_plugins();
+    AxumJson(serde_json::json!({
+        "status": "success",
+        "count": plugins.len(),
+        "data": plugins
+    }))
+}
+
 /// 卸载插件接口
 pub async fn uninstall_handler(
     State(state): State<Arc<AppState>>,

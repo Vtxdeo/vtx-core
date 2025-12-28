@@ -14,11 +14,17 @@ pub struct StreamProtocolLayer;
 
 impl StreamProtocolLayer {
     /// 主入口，根据 `RealBuffer` 类型动态构建响应内容
-    pub async fn process(buffer: RealBuffer, headers: &HeaderMap) -> Response {
+    ///
+    /// 增加 status_code 参数，允许插件控制 HTTP 状态（如 201 Created, 403 Forbidden）
+    pub async fn process(buffer: RealBuffer, headers: &HeaderMap, status_code: u16) -> Response {
+        let status = StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK);
+
         match buffer.inner {
-            BufferType::File(file) => Self::handle_file(file, buffer.path_hint, headers).await,
+            BufferType::File(file) => {
+                Self::handle_file(file, buffer.path_hint, headers, status).await
+            }
             BufferType::Memory(cursor) => {
-                Self::handle_memory(cursor, buffer.mime_override, headers).await
+                Self::handle_memory(cursor, buffer.mime_override, headers, status).await
             }
         }
     }
@@ -28,6 +34,7 @@ impl StreamProtocolLayer {
         mut file: std::fs::File,
         path: Option<std::path::PathBuf>,
         headers: &HeaderMap,
+        default_status: StatusCode,
     ) -> Response {
         let metadata = match file.metadata() {
             Ok(m) => m,
@@ -35,21 +42,20 @@ impl StreamProtocolLayer {
         };
         let file_size = metadata.len();
 
-        // 空文件：直接返回 200 OK 响应，不使用 Range
+        // 空文件
         if file_size == 0 {
             return Response::builder()
-                .status(StatusCode::OK)
+                .status(default_status)
                 .header(header::CONTENT_LENGTH, "0")
                 .body(Body::empty())
                 .unwrap()
                 .into_response();
         }
 
-        // MIME 类型推断：优先使用文件路径，其次基于文件头魔数进行识别
+        // MIME 类型推断
         let content_type = if let Some(p) = path {
             mime_guess::from_path(p).first_raw().unwrap_or("video/mp4")
         } else {
-            // 读取前 4 字节用于判断格式
             let mut magic = [0u8; 4];
             let current_pos = file.stream_position().unwrap_or(0);
             let _ = file.seek(SeekFrom::Start(0));
@@ -61,7 +67,7 @@ impl StreamProtocolLayer {
             }
         };
 
-        // ETag 构造（用于缓存命中）：基于文件大小 + 最后修改时间
+        // ETag 构造
         let mtime = metadata
             .modified()
             .ok()
@@ -79,7 +85,7 @@ impl StreamProtocolLayer {
             return StatusCode::NOT_MODIFIED.into_response();
         }
 
-        // Range 解析（支持标准/后缀/开放范围）
+        // Range 解析
         let range_header = headers.get(header::RANGE).and_then(|v| v.to_str().ok());
         let (start, end) = match range_header {
             Some(range) if range.starts_with("bytes=") => {
@@ -128,15 +134,18 @@ impl StreamProtocolLayer {
         let tokio_file = TokioFile::from_std(file);
         let stream = ReaderStream::with_capacity(
             tokio::io::AsyncReadExt::take(tokio_file, content_length),
-            64 * 1024, // 64KB 传输缓冲区
+            64 * 1024,
         );
 
+        // 如果存在 Range 头，强制使用 206；否则使用传入的 status（默认为 200）
+        let final_status = if range_header.is_some() {
+            StatusCode::PARTIAL_CONTENT
+        } else {
+            default_status
+        };
+
         Response::builder()
-            .status(if range_header.is_some() {
-                StatusCode::PARTIAL_CONTENT
-            } else {
-                StatusCode::OK
-            })
+            .status(final_status)
             .header(header::CONTENT_TYPE, content_type)
             .header(header::ETAG, etag)
             .header(header::ACCEPT_RANGES, "bytes")
@@ -155,8 +164,10 @@ impl StreamProtocolLayer {
         cursor: std::io::Cursor<Vec<u8>>,
         mime: Option<String>,
         _headers: &HeaderMap,
+        status: StatusCode,
     ) -> Response {
         Response::builder()
+            .status(status)
             .header(
                 header::CONTENT_TYPE,
                 mime.unwrap_or_else(|| "application/json".into()),

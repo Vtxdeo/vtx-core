@@ -1,9 +1,9 @@
 use notify::{Event, RecursiveMode, Watcher};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::{PathBuf};
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
 use super::PluginManager;
 

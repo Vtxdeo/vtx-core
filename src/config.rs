@@ -31,6 +31,9 @@ pub struct PluginSettings {
     pub location: PathBuf,
     /// 单个插件实例允许使用的最大内存（单位：MB），默认 100MB
     pub max_memory_mb: u64,
+    /// 指定用于鉴权的插件 ID
+    /// 若设置，系统将直接调用该插件进行鉴权，不再遍历所有插件
+    pub auth_provider: Option<String>,
 }
 
 impl Settings {
@@ -48,6 +51,8 @@ impl Settings {
             )?
             // 默认限制 100MB 内存
             .set_default("plugins.max_memory_mb", 100)?
+            // 默认不指定鉴权提供者
+            .set_default::<&str, Option<String>>("plugins.auth_provider", None)?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
             // 环境变量支持（如 VTX_SERVER__PORT=8080）

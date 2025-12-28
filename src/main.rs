@@ -85,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
         settings.plugins.location.clone(),
         registry.clone(),
         linker,
+        settings.plugins.auth_provider.clone(),
     )?;
 
     // 构造全局状态
@@ -104,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
             Router::new()
                 .route("/scan", post(admin::scan_handler))
                 .route("/videos", get(admin::list_handler))
+                .route("/plugins", get(admin::list_plugins_handler))
                 .route("/plugin", delete(admin::uninstall_handler))
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
