@@ -1,6 +1,6 @@
 use notify::{Event, RecursiveMode, Watcher};
 use std::collections::HashMap;
-use std::path::{PathBuf};
+use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
 use tracing::{error, info};
