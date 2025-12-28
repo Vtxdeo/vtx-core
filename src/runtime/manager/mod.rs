@@ -91,6 +91,23 @@ impl PluginManager {
 
         manager.load_all_plugins()?;
 
+        // 确保配置的 auth_provider 确实已加载，防止单点故障导致的系统裸奔或 500 错误
+        if let Some(auth_id) = &manager.auth_provider {
+            let plugins = manager.plugins.read().unwrap();
+            if !plugins.contains_key(auth_id) {
+                error!(
+                    "[Fatal] Configured auth_provider '{}' not found in loaded plugins!",
+                    auth_id
+                );
+                // 必须阻止启动，迫使管理员检查配置或插件文件
+                return Err(anyhow::anyhow!(
+                    "Critical: Configured auth_provider '{}' is missing. Startup aborted.",
+                    auth_id
+                ));
+            }
+            info!("[Auth] Verified auth_provider '{}' is active.", auth_id);
+        }
+
         watcher::spawn_watcher(manager.clone());
 
         Ok(manager)
@@ -164,6 +181,7 @@ impl PluginManager {
             }
         }
 
+        // 原子替换：如果是 Modify 事件触发的重载，这里会直接覆盖旧的 Arc
         plugins_lock.insert(new_id.clone(), runtime.clone());
 
         routes_lock.retain(|p| p.id != *new_id);
@@ -219,6 +237,21 @@ impl PluginManager {
     }
 
     pub fn uninstall(&self, plugin_id: &str, keep_data: bool) -> anyhow::Result<()> {
+        // 禁止卸载核心鉴权插件。即使文件被删除，内存中也必须保留该插件。
+        if let Some(auth_id) = &self.auth_provider {
+            if auth_id == plugin_id {
+                warn!(
+                    "[Protection] Uninstall blocked for auth_provider '{}'. \
+                     System requires this plugin to remain active. \
+                     Use file replacement (Atomic Move/Copy) to update it.",
+                    plugin_id
+                );
+                return Err(anyhow::anyhow!(
+                    "Operation denied: Cannot uninstall the active auth_provider."
+                ));
+            }
+        }
+
         {
             let mut plugins_lock = self.plugins.write().unwrap();
             if plugins_lock.remove(plugin_id).is_none() {
@@ -258,7 +291,7 @@ impl PluginManager {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // 性能优化：如果配置了 auth_provider，直接进行精确查找
+        // 性能优化：O(1) 精确查找
         if let Some(provider_id) = &self.auth_provider {
             let plugins = self.plugins.read().unwrap();
             if let Some(runtime) = plugins.get(provider_id) {
@@ -267,8 +300,10 @@ impl PluginManager {
                     Err(code) => return Err(code),
                 }
             } else {
-                warn!(
-                    "[Auth] Configured auth_provider '{}' not loaded.",
+                // 理论上由 new() 和 uninstall() 的保护机制，此处不应到达
+                // 但为了防御性编程，保留此错误分支
+                error!(
+                    "[Auth] Critical: auth_provider '{}' missing at runtime!",
                     provider_id
                 );
                 return Err(500);
