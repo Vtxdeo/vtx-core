@@ -40,3 +40,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = "0.14"
 
 vtx-format = "0.1.2"
+vtx-protocol = "2.1.0"
+
+[build-dependencies]
+vtx-protocol = "2.1.0"

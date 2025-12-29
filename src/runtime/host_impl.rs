@@ -6,14 +6,7 @@ use wasmtime::component::Resource;
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
 
-// 绑定 vtx.wit 中的插件接口
-wasmtime::component::bindgen!({
-    path: "../vtx-sdk/wit/vtx.wit",
-    world: "plugin",
-    with: {
-        "vtx:api/stream-io/buffer": crate::common::buffer::RealBuffer,
-    }
-});
+include!(concat!(env!("OUT_DIR"), "/host_bindings.rs"));
 
 pub use vtx::api;
 
@@ -45,11 +38,8 @@ impl api::stream_io::Host for StreamContext {
     fn open_file(&mut self, uuid: String) -> Result<Resource<RealBuffer>, String> {
         // [安全拦截] 鉴权模式下禁止访问文件系统
         if self.policy == SecurityPolicy::Restricted {
-            tracing::warn!(
-                "[Security] Blocked file access in restricted mode: {}",
-                uuid
-            );
-            return Err("Permission Denied: File access is disabled in this context".into());
+            tracing::warn!("[Security] Blocked file access: {}", uuid);
+            return Err("Permission Denied".into());
         }
 
         let file_path = self
@@ -65,11 +55,13 @@ impl api::stream_io::Host for StreamContext {
             mime_override: None,
         };
 
+        // 资源表分配失败转换为 String 错误
         self.table
             .push(rb)
             .map_err(|e| format!("Resource Table Error: {}", e))
     }
 
+    // 修正：去除外层 wasmtime::Result
     fn create_memory_buffer(&mut self, data: Vec<u8>) -> Resource<RealBuffer> {
         let rb = RealBuffer {
             inner: BufferType::Memory(Cursor::new(data)),
@@ -77,22 +69,24 @@ impl api::stream_io::Host for StreamContext {
             mime_override: Some("application/json".to_string()),
         };
 
-        // 内存缓冲区分配失败视为致命错误，直接 panic
+        // 此接口无错误返回值，若分配失败则直接 Panic (触发 Wasm Trap)
         self.table
             .push(rb)
-            .expect("Critical error: Failed to allocate memory buffer")
+            .expect("Critical: Failed to allocate memory buffer in host table")
     }
 }
 
 /// 插件侧调用：缓冲区操作实现
 impl api::stream_io::HostBuffer for StreamContext {
+    // 修正：直接返回 u64
     fn size(&mut self, resource: Resource<RealBuffer>) -> u64 {
         self.table
             .get(&resource)
             .map(|b| b.inner.get_size())
-            .unwrap_or(0)
+            .unwrap_or(0) // 无效句柄返回 0，或可选择 panic
     }
 
+    // 修正：直接返回 Vec<u8>
     fn read(&mut self, resource: Resource<RealBuffer>, offset: u64, max_bytes: u64) -> Vec<u8> {
         let mut chunk = vec![0u8; max_bytes as usize];
 
@@ -106,16 +100,16 @@ impl api::stream_io::HostBuffer for StreamContext {
         chunk
     }
 
+    // 注意：drop 方法在 bindgen 中通常保留 wasmtime::Result<()> 返回值
     fn drop(&mut self, resource: Resource<RealBuffer>) -> wasmtime::Result<()> {
-        self.table
-            .delete(resource)
-            .map(|_| ())
-            .map_err(|e| anyhow::anyhow!(e))
+        self.table.delete(resource)?;
+        Ok(())
     }
 }
 
 /// 插件侧调用：执行 SQL 语句
 impl api::sql::Host for StreamContext {
+    // 修正：直接返回 Result<u64, String>
     fn execute(
         &mut self,
         statement: String,
@@ -123,20 +117,17 @@ impl api::sql::Host for StreamContext {
     ) -> Result<u64, String> {
         // [安全拦截] 鉴权模式下禁止写入数据库
         if self.policy == SecurityPolicy::Restricted {
-            tracing::warn!(
-                "[Security] Blocked SQL write in restricted mode: {}",
-                statement
-            );
-            return Err("Permission Denied: Database write is disabled in this context".into());
+            return Err("Permission Denied".into());
         }
 
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
+
         let sql_params = convert_params(&params);
         let param_refs: Vec<&dyn ToSql> = sql_params.iter().map(|b| b.as_ref()).collect();
 
         conn.execute(&statement, param_refs.as_slice())
             .map(|rows| rows as u64)
-            .map_err(|e| format!("SQL Execution Error: {}", e))
+            .map_err(|e| format!("SQL Error: {}", e))
     }
 
     fn query_json(
@@ -146,18 +137,19 @@ impl api::sql::Host for StreamContext {
     ) -> Result<String, String> {
         // 查询操作在所有模式下均允许
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
+
         let sql_params = convert_params(&params);
         let param_refs: Vec<&dyn ToSql> = sql_params.iter().map(|b| b.as_ref()).collect();
 
         let mut stmt = conn.prepare(&statement).map_err(|e| e.to_string())?;
-        let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
 
-        let mut rows_json = Vec::new();
+        let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let mut rows = stmt
             .query(param_refs.as_slice())
             .map_err(|e| e.to_string())?;
 
-        while let Some(row) = rows.next().map_err(|e| e.to_string())? {
+        let mut rows_json = Vec::new();
+        while let Ok(Some(row)) = rows.next() {
             let mut obj = Map::new();
             for (i, col_name) in col_names.iter().enumerate() {
                 let json_val = match row.get_ref(i).unwrap() {
