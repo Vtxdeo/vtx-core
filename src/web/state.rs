@@ -1,6 +1,8 @@
 use crate::config::Settings;
+use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::manager::PluginManager;
 use crate::storage::VideoRegistry;
+use std::sync::Arc;
 use wasmtime::Engine;
 
 /// Web 应用全局状态
@@ -12,4 +14,5 @@ pub struct AppState {
     pub plugin_manager: PluginManager,
     pub registry: VideoRegistry,
     pub config: Settings,
+    pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
 }

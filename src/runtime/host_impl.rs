@@ -21,15 +21,22 @@ impl BufferIo for BufferType {
         match self {
             BufferType::File(f) => f.metadata().map(|m| m.len()).unwrap_or(0),
             BufferType::Memory(c) => c.get_ref().len() as u64,
+            BufferType::Pipe(_) => 0,
         }
     }
 
     fn read_at(&mut self, offset: u64, dest: &mut [u8]) -> usize {
-        let result = match self {
-            BufferType::File(f) => f.seek(SeekFrom::Start(offset)).and_then(|_| f.read(dest)),
-            BufferType::Memory(c) => c.seek(SeekFrom::Start(offset)).and_then(|_| c.read(dest)),
-        };
-        result.unwrap_or(0)
+        match self {
+            BufferType::File(f) => f
+                .seek(SeekFrom::Start(offset))
+                .and_then(|_| f.read(dest))
+                .unwrap_or(0),
+            BufferType::Memory(c) => c
+                .seek(SeekFrom::Start(offset))
+                .and_then(|_| c.read(dest))
+                .unwrap_or(0),
+            BufferType::Pipe(_) => 0,
+        }
     }
 }
 
@@ -53,6 +60,7 @@ impl api::stream_io::Host for StreamContext {
             inner: BufferType::File(file),
             path_hint: Some(file_path),
             mime_override: None,
+            process_handle: None,
         };
 
         // 资源表分配失败转换为 String 错误
@@ -61,12 +69,12 @@ impl api::stream_io::Host for StreamContext {
             .map_err(|e| format!("Resource Table Error: {}", e))
     }
 
-    // 修正：去除外层 wasmtime::Result
     fn create_memory_buffer(&mut self, data: Vec<u8>) -> Resource<RealBuffer> {
         let rb = RealBuffer {
             inner: BufferType::Memory(Cursor::new(data)),
             path_hint: None,
             mime_override: Some("application/json".to_string()),
+            process_handle: None,
         };
 
         // 此接口无错误返回值，若分配失败则直接 Panic (触发 Wasm Trap)
@@ -78,15 +86,13 @@ impl api::stream_io::Host for StreamContext {
 
 /// 插件侧调用：缓冲区操作实现
 impl api::stream_io::HostBuffer for StreamContext {
-    // 修正：直接返回 u64
     fn size(&mut self, resource: Resource<RealBuffer>) -> u64 {
         self.table
             .get(&resource)
             .map(|b| b.inner.get_size())
-            .unwrap_or(0) // 无效句柄返回 0，或可选择 panic
+            .unwrap_or(0)
     }
 
-    // 修正：直接返回 Vec<u8>
     fn read(&mut self, resource: Resource<RealBuffer>, offset: u64, max_bytes: u64) -> Vec<u8> {
         let mut chunk = vec![0u8; max_bytes as usize];
 
@@ -100,16 +106,79 @@ impl api::stream_io::HostBuffer for StreamContext {
         chunk
     }
 
-    // 注意：drop 方法在 bindgen 中通常保留 wasmtime::Result<()> 返回值
     fn drop(&mut self, resource: Resource<RealBuffer>) -> wasmtime::Result<()> {
         self.table.delete(resource)?;
         Ok(())
     }
 }
 
-/// 插件侧调用：执行 SQL 语句
+impl api::ffmpeg::Host for StreamContext {
+    fn execute(
+        &mut self,
+        params: api::ffmpeg::TranscodeParams,
+    ) -> Result<Resource<RealBuffer>, String> {
+        if self.policy == SecurityPolicy::Restricted {
+            tracing::warn!("[Security] VtxFfmpeg execution denied (Restricted mode).");
+            return Err("Permission Denied: VtxFfmpeg requires root privileges".into());
+        }
+
+        // 读取超时配置
+        let timeout_secs = self.vtx_ffmpeg.execution_timeout_secs;
+        tracing::debug!(
+            "[VtxFfmpeg] Request: Profile='{}', Input='{}', Timeout={}s",
+            params.profile,
+            params.input_id,
+            timeout_secs
+        );
+
+        let binary_path = self
+            .vtx_ffmpeg
+            .get_binary(&params.profile)
+            .ok_or_else(|| format!("Profile '{}' not found/installed on host", params.profile))?;
+
+        let input_path = self
+            .registry
+            .get_path(&params.input_id)
+            .ok_or_else(|| format!("Input video ID '{}' not found", params.input_id))?;
+
+        let handle = tokio::runtime::Handle::try_current()
+            .map_err(|e| format!("Failed to get tokio runtime: {}", e))?;
+
+        let child_result = handle.block_on(async {
+            let mut cmd = tokio::process::Command::new(binary_path);
+            cmd.arg("-i").arg(input_path);
+            cmd.args(&params.args);
+            cmd.stdout(std::process::Stdio::piped());
+            cmd.stderr(std::process::Stdio::inherit());
+            cmd.stdin(std::process::Stdio::null());
+            cmd.kill_on_drop(true);
+
+            // TODO: 利用 timeout_secs 实现更复杂的超时控制逻辑
+
+            cmd.spawn()
+        });
+
+        let mut child = child_result.map_err(|e| format!("Failed to spawn vtx-ffmpeg: {}", e))?;
+
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Failed to capture vtx-ffmpeg stdout".to_string())?;
+
+        let rb = RealBuffer {
+            inner: BufferType::Pipe(stdout),
+            path_hint: None,
+            mime_override: Some("video/mp4".to_string()),
+            process_handle: Some(child),
+        };
+
+        self.table
+            .push(rb)
+            .map_err(|e| format!("Resource Table Error: {}", e))
+    }
+}
+
 impl api::sql::Host for StreamContext {
-    // 修正：直接返回 Result<u64, String>
     fn execute(
         &mut self,
         statement: String,

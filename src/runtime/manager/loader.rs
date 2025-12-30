@@ -1,10 +1,12 @@
 use crate::runtime::{
     context::{SecurityPolicy, StreamContext},
+    ffmpeg::VtxFfmpegManager,
     host_impl::Plugin,
 };
 use crate::storage::VideoRegistry;
 use anyhow::Context;
 use std::path::Path;
+use std::sync::Arc;
 use tracing::{debug, error, info};
 use wasmtime::{
     component::{Component, Linker},
@@ -29,6 +31,7 @@ pub fn load_and_migrate(
     registry: &VideoRegistry,
     linker: &Linker<StreamContext>,
     vtx_path: &Path,
+    vtx_ffmpeg: Arc<VtxFfmpegManager>,
 ) -> anyhow::Result<LoadResult> {
     enforce_vtx_only(vtx_path)?;
 
@@ -37,6 +40,7 @@ pub fn load_and_migrate(
     // Root 权限允许迁移
     let ctx = StreamContext::new_secure(
         registry.clone(),
+        vtx_ffmpeg,
         wasmtime::StoreLimitsBuilder::new().build(),
         SecurityPolicy::Root,
     );

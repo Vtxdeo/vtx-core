@@ -28,6 +28,8 @@ impl PluginExecutor {
     ) -> Result<(RealBuffer, u16), String> {
         let engine = state.engine.clone();
         let registry = state.registry.clone();
+        // 获取全局的 ffmpeg 管理器引用
+        let vtx_ffmpeg = state.vtx_ffmpeg.clone();
 
         // 使用传入的 instance_pre，而非去 manager 全局查找
         let instance_pre = runtime.instance_pre.clone();
@@ -41,7 +43,8 @@ impl PluginExecutor {
                 .tables(1000)
                 .build();
 
-            let ctx = StreamContext::new_secure(registry, limits, SecurityPolicy::Root);
+            // 注入 vtx_ffmpeg 到上下文
+            let ctx = StreamContext::new_secure(registry, vtx_ffmpeg, limits, SecurityPolicy::Root);
 
             let mut store = Store::new(&engine, ctx);
             store.limiter(|s| &mut s.limiter);
@@ -54,9 +57,9 @@ impl PluginExecutor {
                 .map_err(|e| format!("Plugin binding failed: {}", e))?;
 
             let req = api::types::HttpRequest {
-                method, // 使用传入的 method
+                method,
                 path: sub_path,
-                query, // 使用传入的 query
+                query,
             };
 
             let response = plugin

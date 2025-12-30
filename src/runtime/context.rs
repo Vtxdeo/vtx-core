@@ -1,14 +1,16 @@
+use std::sync::Arc;
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
+use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::storage::VideoRegistry;
 
 /// 安全策略等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityPolicy {
-    /// 根权限：允许所有操作（文件IO、数据库读写）
+    /// 根权限：允许所有操作（文件IO、数据库读写、进程执行）
     /// 适用于：正常请求处理 (PluginExecutor)
     Root,
-    /// 受限权限：仅允许只读 SQL，禁止文件 IO
+    /// 受限权限：仅允许只读 SQL，禁止文件 IO 和进程执行
     /// 适用于：身份验证 (verify_identity)
     Restricted,
 }
@@ -20,12 +22,16 @@ pub struct StreamContext {
     pub registry: VideoRegistry,
     pub limiter: wasmtime::StoreLimits,
     pub policy: SecurityPolicy,
+    /// VtxFfmpeg 管理器引用
+    /// 允许 Host Function 访问工具链配置
+    pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
 }
 
 impl StreamContext {
     /// 创建一个零信任的插件沙箱上下文
     pub fn new_secure(
         registry: VideoRegistry,
+        vtx_ffmpeg: Arc<VtxFfmpegManager>,
         limiter: wasmtime::StoreLimits,
         policy: SecurityPolicy,
     ) -> Self {
@@ -41,6 +47,7 @@ impl StreamContext {
             registry,
             limiter,
             policy,
+            vtx_ffmpeg,
         }
     }
 }
@@ -56,8 +63,6 @@ impl WasiView for StreamContext {
 }
 
 /// 实现资源限制接口
-///
-/// 职责：限制内存、表空间的增长，防止插件滥用资源。
 impl wasmtime::ResourceLimiter for StreamContext {
     fn memory_growing(
         &mut self,

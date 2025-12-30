@@ -14,7 +14,7 @@ use tracing::info;
 use wasmtime::component::Linker;
 
 use crate::config::Settings;
-use crate::runtime::{host_impl::api, manager::PluginManager};
+use crate::runtime::{ffmpeg::VtxFfmpegManager, host_impl::api, manager::PluginManager};
 use crate::storage::VideoRegistry;
 use crate::web::{
     api::{admin, plugin},
@@ -76,16 +76,24 @@ async fn main() -> anyhow::Result<()> {
     wasmtime_wasi::add_to_linker_sync(&mut linker)?;
     api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
     api::sql::add_to_linker(&mut linker, |ctx| ctx)?;
+    api::ffmpeg::add_to_linker(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
 
-    // 初始化插件管理器
+    // 初始化 vtx-ffmpeg 中间层管理器
+    let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(
+        settings.vtx_ffmpeg.binary_root.clone(),
+        settings.vtx_ffmpeg.execution_timeout_secs,
+    ));
+
+    // 初始化插件管理器 (传入 vtx_ffmpeg_manager)
     let plugin_manager = PluginManager::new(
         engine.clone(),
         settings.plugins.location.clone(),
         registry.clone(),
         linker,
         settings.plugins.auth_provider.clone(),
+        vtx_ffmpeg_manager.clone(),
     )?;
 
     // 构造全局状态
@@ -94,6 +102,7 @@ async fn main() -> anyhow::Result<()> {
         plugin_manager,
         registry,
         config: settings.clone(),
+        vtx_ffmpeg: vtx_ffmpeg_manager,
     });
 
     // 路由定义

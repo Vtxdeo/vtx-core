@@ -8,6 +8,7 @@ pub struct Settings {
     pub server: ServerSettings,
     pub database: DatabaseSettings,
     pub plugins: PluginSettings,
+    pub vtx_ffmpeg: VtxFfmpegSettings,
 }
 
 /// 服务相关配置（监听地址、端口、资源根目录）
@@ -36,6 +37,19 @@ pub struct PluginSettings {
     pub auth_provider: Option<String>,
 }
 
+/// VtxFfmpeg 中间层专用配置
+///
+/// 职责：定义媒体处理工具链的路径与运行时约束
+#[derive(Debug, Deserialize, Clone)]
+pub struct VtxFfmpegSettings {
+    /// vtx-ffmpeg 二进制工具链的根目录
+    /// 系统将自动扫描该目录下符合 vtx-ffmpeg-{profile} 命名规范的可执行文件
+    pub binary_root: PathBuf,
+    /// 子进程执行超时时间（单位：秒）
+    /// 用于防止异常进程僵死占用系统资源，0 表示不限制（不推荐）
+    pub execution_timeout_secs: u64,
+}
+
 impl Settings {
     /// 加载配置：支持默认值、可选配置文件、环境变量覆盖
     pub fn new() -> anyhow::Result<Self> {
@@ -53,6 +67,9 @@ impl Settings {
             .set_default("plugins.max_memory_mb", 100)?
             // 默认不指定鉴权提供者
             .set_default::<&str, Option<String>>("plugins.auth_provider", None)?
+            // VtxFfmpeg 默认配置
+            .set_default("vtx_ffmpeg.binary_root", "./bin/ffmpeg")?
+            .set_default("vtx_ffmpeg.execution_timeout_secs", 600)?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
             // 环境变量支持（如 VTX_SERVER__PORT=8080）

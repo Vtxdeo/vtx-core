@@ -10,6 +10,7 @@ use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime::Engine;
 
 use crate::runtime::context::{SecurityPolicy, StreamContext};
+use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::Manifest;
 use crate::runtime::host_impl::Plugin;
@@ -44,6 +45,8 @@ pub struct PluginManager {
     routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
     /// 鉴权提供者 ID
     auth_provider: Option<String>,
+    /// VtxFfmpeg 工具链管理器
+    pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
 }
 
 impl PluginManager {
@@ -53,6 +56,7 @@ impl PluginManager {
         registry: VideoRegistry,
         linker: Linker<StreamContext>,
         auth_provider: Option<String>,
+        vtx_ffmpeg: Arc<VtxFfmpegManager>,
     ) -> anyhow::Result<Self> {
         if plugin_dir.is_file() {
             warn!(
@@ -87,6 +91,7 @@ impl PluginManager {
             plugins: Arc::new(RwLock::new(HashMap::new())),
             routes: Arc::new(RwLock::new(Vec::new())),
             auth_provider,
+            vtx_ffmpeg,
         };
 
         manager.load_all_plugins()?;
@@ -148,8 +153,13 @@ impl PluginManager {
     }
 
     pub fn load_one(&self, path: &Path) -> anyhow::Result<()> {
-        let load_result =
-            loader::load_and_migrate(&self.engine, &self.registry, &self.linker, path)?;
+        let load_result = loader::load_and_migrate(
+            &self.engine,
+            &self.registry,
+            &self.linker,
+            path,
+            self.vtx_ffmpeg.clone(),
+        )?;
         let instance_pre = self.linker.instantiate_pre(&load_result.component)?;
 
         let runtime = Arc::new(PluginRuntime {
@@ -339,8 +349,12 @@ impl PluginManager {
             .memory_size(10 * 1024 * 1024)
             .build();
 
-        let ctx =
-            StreamContext::new_secure(self.registry.clone(), limits, SecurityPolicy::Restricted);
+        let ctx = StreamContext::new_secure(
+            self.registry.clone(),
+            self.vtx_ffmpeg.clone(),
+            limits,
+            SecurityPolicy::Restricted,
+        );
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);
 

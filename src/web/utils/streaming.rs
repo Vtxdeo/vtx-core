@@ -1,32 +1,89 @@
 use axum::{
-    body::Body,
+    body::{Body, Bytes},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use futures_util::Stream;
 use std::io::{Read, Seek, SeekFrom};
+use std::pin::Pin;
+use std::task::{Context, Poll};
 use tokio::fs::File as TokioFile;
+use tokio::process::{Child, ChildStdout};
 use tokio_util::io::ReaderStream;
 
 use crate::common::buffer::{BufferType, RealBuffer};
 
-/// HTTP 响应构建器：支持文件与内存缓冲区的异步流式传输
+/// 管道流包装器
+///
+/// 职责：包装来自子进程的 stdout 流，并持有子进程句柄 (Child)。
+/// 只要这个 Stream 还在被 Axum 轮询（即客户端还在下载），Child 就不会被 Drop，进程保持存活。
+/// 一旦流结束或连接断开，ProcessStream 被 Drop，Child 随之 Drop，触发 kill_on_drop 机制清理进程。
+struct ProcessStream {
+    stream: ReaderStream<ChildStdout>,
+    // 即使不使用它，也必须持有它以维持进程生命周期
+    #[allow(dead_code)]
+    _child: Option<Child>,
+}
+
+impl Stream for ProcessStream {
+    type Item = std::io::Result<Bytes>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        Pin::new(&mut self.stream).poll_next(cx)
+    }
+}
+
+/// HTTP 响应构建器：支持文件、内存缓冲区及子进程管道的统一流式传输
 pub struct StreamProtocolLayer;
 
 impl StreamProtocolLayer {
     /// 主入口，根据 `RealBuffer` 类型动态构建响应内容
-    ///
-    /// 增加 status_code 参数，允许插件控制 HTTP 状态（如 201 Created, 403 Forbidden）
     pub async fn process(buffer: RealBuffer, headers: &HeaderMap, status_code: u16) -> Response {
         let status = StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK);
 
-        match buffer.inner {
-            BufferType::File(file) => {
-                Self::handle_file(file, buffer.path_hint, headers, status).await
-            }
+        let RealBuffer {
+            inner,
+            path_hint,
+            mime_override,
+            process_handle,
+        } = buffer;
+
+        match inner {
+            BufferType::File(file) => Self::handle_file(file, path_hint, headers, status).await,
             BufferType::Memory(cursor) => {
-                Self::handle_memory(cursor, buffer.mime_override, headers, status).await
+                Self::handle_memory(cursor, mime_override, headers, status).await
+            }
+            BufferType::Pipe(stdout) => {
+                Self::handle_pipe(stdout, process_handle, mime_override, status).await
             }
         }
+    }
+
+    /// 构建管道流响应（用于实时转码等场景）
+    async fn handle_pipe(
+        stdout: ChildStdout,
+        child: Option<Child>,
+        mime: Option<String>,
+        status: StatusCode,
+    ) -> Response {
+        // 创建保活流
+        let stream = ProcessStream {
+            stream: ReaderStream::new(stdout),
+            _child: child,
+        };
+
+        Response::builder()
+            .status(status)
+            // 管道流通常是实时生成的，禁用缓存
+            .header(header::CACHE_CONTROL, "no-cache")
+            .header(
+                header::CONTENT_TYPE,
+                mime.unwrap_or_else(|| "video/mp4".into()), // 默认假定为视频流
+            )
+            // 实时流无法预知长度，不发送 Content-Length，Axum 会自动处理为 chunked 传输
+            .body(Body::from_stream(stream))
+            .unwrap()
+            .into_response()
     }
 
     /// 构建文件响应（支持断点续传 Range、ETag 缓存校验、MIME 推断等）
@@ -159,7 +216,7 @@ impl StreamProtocolLayer {
             .into_response()
     }
 
-    /// 构建内存缓冲区响应（如 JSON、文本、HTML 等）
+    /// 构建内存缓冲区响应
     async fn handle_memory(
         cursor: std::io::Cursor<Vec<u8>>,
         mime: Option<String>,

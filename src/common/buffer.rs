@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::Cursor;
 use std::path::PathBuf;
+use tokio::process::{Child, ChildStdout};
 
 /// 表示统一的缓冲区类型，支持多种数据来源
 pub enum BufferType {
@@ -8,6 +9,8 @@ pub enum BufferType {
     File(File),
     /// 内存中的字节缓冲区
     Memory(Cursor<Vec<u8>>),
+    /// 异步管道流 (来自 vtx-ffmpeg 子进程)
+    Pipe(ChildStdout),
 }
 
 /// 封装通用缓冲区及其元数据
@@ -18,4 +21,7 @@ pub struct RealBuffer {
     pub path_hint: Option<PathBuf>,
     /// MIME 覆盖：插件可显式指定内容类型（如 "application/json"）
     pub mime_override: Option<String>,
+    /// 进程句柄：持有它以确保存活
+    /// 当 RealBuffer 被销毁时，Child 会被 Drop，从而触发 kill 信号清理进程
+    pub process_handle: Option<Child>,
 }
