@@ -1,6 +1,7 @@
 use wasmtime::component::Resource;
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
+use crate::runtime::host_impl::ffmpeg_policy::validate_ffmpeg_args;
 use super::api;
 use std::process::Stdio;
 
@@ -48,6 +49,8 @@ impl api::ffmpeg::Host for StreamContext {
 
         let handle = tokio::runtime::Handle::try_current()
             .map_err(|e| format!("Failed to get tokio runtime: {}", e))?;
+
+        validate_ffmpeg_args(&params.args)?;
 
         let binary_path = binary.path.clone();
         let child_result = handle.block_on(async {
