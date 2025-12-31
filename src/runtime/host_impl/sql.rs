@@ -1,5 +1,6 @@
 use super::api;
-use crate::runtime::context::{SecurityPolicy, StreamContext};
+use crate::runtime::context::StreamContext;
+use crate::runtime::host_impl::sql_policy::enforce_sql_policy;
 use rusqlite::types::ToSql;
 use serde_json::{Map, Value};
 
@@ -9,15 +10,15 @@ impl api::sql::Host for StreamContext {
         statement: String,
         params: Vec<api::sql::DbValue>,
     ) -> Result<u64, String> {
-        // [安全拦截] 鉴权模式下禁止写入数据库
-        if self.policy == SecurityPolicy::Restricted {
-            return Err("Permission Denied".into());
-        }
-
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
 
         let sql_params = convert_params(&params);
         let param_refs: Vec<&dyn ToSql> = sql_params.iter().map(|b| b.as_ref()).collect();
+
+        {
+            let stmt = conn.prepare(&statement).map_err(|e| e.to_string())?;
+            enforce_sql_policy(self, &statement, &stmt)?;
+        }
 
         conn.execute(&statement, param_refs.as_slice())
             .map(|rows| rows as u64)
@@ -29,13 +30,13 @@ impl api::sql::Host for StreamContext {
         statement: String,
         params: Vec<api::sql::DbValue>,
     ) -> Result<String, String> {
-        // 查询操作在所有模式下均允许
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
 
         let sql_params = convert_params(&params);
         let param_refs: Vec<&dyn ToSql> = sql_params.iter().map(|b| b.as_ref()).collect();
 
         let mut stmt = conn.prepare(&statement).map_err(|e| e.to_string())?;
+        enforce_sql_policy(self, &statement, &stmt)?;
 
         let col_names: Vec<String> = stmt.column_names().iter().map(|s| s.to_string()).collect();
         let mut rows = stmt

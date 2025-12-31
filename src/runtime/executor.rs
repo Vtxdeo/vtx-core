@@ -33,6 +33,7 @@ impl PluginExecutor {
 
         // 使用传入的 instance_pre，而非去 manager 全局查找
         let instance_pre = runtime.instance_pre.clone();
+        let plugin_id = runtime.id.clone();
 
         let memory_limit_bytes = state.config.plugins.max_memory_mb as usize * 1024 * 1024;
 
@@ -44,7 +45,13 @@ impl PluginExecutor {
                 .build();
 
             // 注入 vtx_ffmpeg 到上下文
-            let ctx = StreamContext::new_secure(registry, vtx_ffmpeg, limits, SecurityPolicy::Root);
+            let ctx = StreamContext::new_secure(
+                registry,
+                vtx_ffmpeg,
+                limits,
+                SecurityPolicy::Plugin,
+                Some(plugin_id),
+            );
 
             let mut store = Store::new(&engine, ctx);
             store.limiter(|s| &mut s.limiter);

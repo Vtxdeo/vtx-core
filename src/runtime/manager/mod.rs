@@ -354,6 +354,7 @@ impl PluginManager {
             self.vtx_ffmpeg.clone(),
             limits,
             SecurityPolicy::Restricted,
+            Some(runtime.id.clone()),
         );
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);

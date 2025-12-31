@@ -50,6 +50,20 @@ pub(crate) fn register_resource(
     }
 }
 
+/// 鑾峰彇鎻掍欢璧勬簮鍒楄〃
+pub(crate) fn list_resources(
+    pool: &Pool<SqliteConnectionManager>,
+    plugin_name: &str,
+    res_type: &str,
+) -> anyhow::Result<Vec<String>> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare(
+        "SELECT resource_name FROM sys_plugin_resources WHERE plugin_name = ?1 AND resource_type = ?2",
+    )?;
+    let rows = stmt.query_map(params![plugin_name, res_type], |row| row.get(0))?;
+    Ok(rows.filter_map(Result::ok).collect())
+}
+
 /// 验证并锁定安装路径
 ///
 /// 职责：确保同一插件 ID 不会被安装到不同路径。

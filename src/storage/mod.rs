@@ -78,6 +78,15 @@ impl VideoRegistry {
         plugins::register_resource(&self.pool, plugin_name, res_type, res_name)
     }
 
+    /// 获取插件已注册的资源列表
+    pub fn list_plugin_resources(
+        &self,
+        plugin_name: &str,
+        res_type: &str,
+    ) -> anyhow::Result<Vec<String>> {
+        plugins::list_resources(&self.pool, plugin_name, res_type)
+    }
+
     /// 验证插件是否已安装，并尝试锁定安装路径
     pub fn verify_installation(
         &self,

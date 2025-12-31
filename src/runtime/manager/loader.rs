@@ -43,6 +43,7 @@ pub fn load_and_migrate(
         vtx_ffmpeg,
         wasmtime::StoreLimitsBuilder::new().build(),
         SecurityPolicy::Root,
+        None,
     );
     let mut store = wasmtime::Store::new(engine, ctx);
 
