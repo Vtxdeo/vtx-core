@@ -1,4 +1,9 @@
 use crate::runtime::context::{SecurityPolicy, StreamContext};
+use sqlparser::ast::{
+    FromTable, ObjectName, Query, SetExpr, Statement, TableFactor, TableWithJoins,
+};
+use sqlparser::dialect::SQLiteDialect;
+use sqlparser::parser::Parser;
 use std::collections::HashSet;
 
 pub fn enforce_sql_policy(
@@ -10,11 +15,14 @@ pub fn enforce_sql_policy(
         return Ok(());
     }
 
-    ensure_single_statement(statement)?;
-
-    let leading = first_keyword(statement).ok_or("SQL Error: empty statement")?;
-    let allowed = ["select", "with", "insert", "update", "delete", "replace"];
-    if !allowed.contains(&leading.as_str()) {
+    let dialect = SQLiteDialect {};
+    let parsed = Parser::parse_sql(&dialect, statement)
+        .map_err(|_| "Permission Denied".to_string())?;
+    if parsed.len() != 1 {
+        return Err("Permission Denied".into());
+    }
+    let ast = &parsed[0];
+    if !is_allowed_statement(ast) {
         return Err("Permission Denied".into());
     }
 
@@ -37,7 +45,8 @@ pub fn enforce_sql_policy(
         .map(|t| t.to_ascii_lowercase())
         .collect();
 
-    let used_tables = extract_table_names(statement);
+    let mut used_tables = Vec::new();
+    collect_tables_from_statement(ast, &mut used_tables)?;
     if !is_readonly && used_tables.is_empty() {
         return Err("Permission Denied".into());
     }
@@ -55,293 +64,132 @@ pub fn enforce_sql_policy(
     Ok(())
 }
 
-fn ensure_single_statement(statement: &str) -> Result<(), String> {
-    let bytes = statement.as_bytes();
-    let mut i = 0;
-    let mut in_single = false;
-    let mut in_double = false;
-    let mut in_backtick = false;
-    let mut in_bracket = false;
-    let mut in_line_comment = false;
-    let mut in_block_comment = false;
+fn is_allowed_statement(stmt: &Statement) -> bool {
+    matches!(
+        stmt,
+        Statement::Query(_)
+            | Statement::Insert { .. }
+            | Statement::Update { .. }
+            | Statement::Delete { .. }
+    )
+}
 
-    while i < bytes.len() {
-        let b = bytes[i];
-        if in_line_comment {
-            if b == b'\n' {
-                in_line_comment = false;
+fn collect_tables_from_statement(
+    stmt: &Statement,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    match stmt {
+        Statement::Query(query) => collect_tables_from_query(query, out),
+        Statement::Insert {
+            table_name, source, ..
+        } => {
+            out.push(object_name_to_string(table_name)?);
+            if let Some(source) = source {
+                collect_tables_from_query(source, out)?;
             }
-            i += 1;
-            continue;
+            Ok(())
         }
-        if in_block_comment {
-            if b == b'*' && i + 1 < bytes.len() && bytes[i + 1] == b'/' {
-                in_block_comment = false;
-                i += 2;
-                continue;
+        Statement::Update { table, from, .. } => {
+            collect_tables_from_table_with_joins(table, out)?;
+            if let Some(from) = from {
+                collect_tables_from_table_with_joins(from, out)?;
             }
-            i += 1;
-            continue;
+            Ok(())
         }
-        if in_single {
-            if b == b'\'' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
-                    i += 2;
-                    continue;
+        Statement::Delete {
+            tables,
+            from,
+            using,
+            ..
+        } => {
+            for table in tables {
+                out.push(object_name_to_string(table)?);
+            }
+            match from {
+                FromTable::WithFromKeyword(from) | FromTable::WithoutKeyword(from) => {
+                    for table in from {
+                        collect_tables_from_table_with_joins(table, out)?;
+                    }
                 }
-                in_single = false;
             }
-            i += 1;
-            continue;
-        }
-        if in_double {
-            if b == b'"' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'"' {
-                    i += 2;
-                    continue;
+            if let Some(using) = using {
+                for table in using {
+                    collect_tables_from_table_with_joins(table, out)?;
                 }
-                in_double = false;
             }
-            i += 1;
-            continue;
+            Ok(())
         }
-        if in_backtick {
-            if b == b'`' {
-                if i + 1 < bytes.len() && bytes[i + 1] == b'`' {
-                    i += 2;
-                    continue;
-                }
-                in_backtick = false;
-            }
-            i += 1;
-            continue;
-        }
-        if in_bracket {
-            if b == b']' {
-                in_bracket = false;
-            }
-            i += 1;
-            continue;
-        }
-
-        if b == b'-' && i + 1 < bytes.len() && bytes[i + 1] == b'-' {
-            in_line_comment = true;
-            i += 2;
-            continue;
-        }
-        if b == b'/' && i + 1 < bytes.len() && bytes[i + 1] == b'*' {
-            in_block_comment = true;
-            i += 2;
-            continue;
-        }
-        if b == b'\'' {
-            in_single = true;
-            i += 1;
-            continue;
-        }
-        if b == b'"' {
-            in_double = true;
-            i += 1;
-            continue;
-        }
-        if b == b'`' {
-            in_backtick = true;
-            i += 1;
-            continue;
-        }
-        if b == b'[' {
-            in_bracket = true;
-            i += 1;
-            continue;
-        }
-
-        if b == b';' {
-            let rest = &statement[i + 1..];
-            if has_non_ws_or_comment(rest) {
-                return Err("Permission Denied".into());
-            }
-            return Ok(());
-        }
-
-        i += 1;
+        _ => Err("Permission Denied".into()),
     }
+}
 
+fn collect_tables_from_query(
+    query: &Query,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    if let Some(with) = &query.with {
+        for cte in &with.cte_tables {
+            collect_tables_from_query(&cte.query, out)?;
+        }
+    }
+    collect_tables_from_setexpr(&query.body, out)
+}
+
+fn collect_tables_from_setexpr(
+    expr: &SetExpr,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    match expr {
+        SetExpr::Select(select) => {
+            for table in &select.from {
+                collect_tables_from_table_with_joins(table, out)?;
+            }
+            Ok(())
+        }
+        SetExpr::SetOperation { left, right, .. } => {
+            collect_tables_from_setexpr(left, out)?;
+            collect_tables_from_setexpr(right, out)
+        }
+        SetExpr::Query(query) => collect_tables_from_query(query, out),
+        SetExpr::Values(_) => Ok(()),
+        _ => Err("Permission Denied".into()),
+    }
+}
+
+fn collect_tables_from_table_with_joins(
+    table: &TableWithJoins,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    collect_tables_from_table_factor(&table.relation, out)?;
+    for join in &table.joins {
+        collect_tables_from_table_factor(&join.relation, out)?;
+    }
     Ok(())
 }
 
-fn has_non_ws_or_comment(mut input: &str) -> bool {
-    loop {
-        let trimmed = input.trim_start();
-        if trimmed.is_empty() {
-            return false;
+fn collect_tables_from_table_factor(
+    table: &TableFactor,
+    out: &mut Vec<String>,
+) -> Result<(), String> {
+    match table {
+        TableFactor::Table { name, .. } => {
+            out.push(object_name_to_string(name)?);
+            Ok(())
         }
-        if trimmed.starts_with("--") {
-            if let Some(idx) = trimmed.find('\n') {
-                input = &trimmed[idx + 1..];
-                continue;
-            }
-            return false;
+        TableFactor::Derived { subquery, .. } => collect_tables_from_query(subquery, out),
+        TableFactor::NestedJoin { table_with_joins, .. } => {
+            collect_tables_from_table_with_joins(table_with_joins, out)
         }
-        if trimmed.starts_with("/*") {
-            if let Some(idx) = trimmed.find("*/") {
-                input = &trimmed[idx + 2..];
-                continue;
-            }
-            return false;
-        }
-        return true;
+        _ => Err("Permission Denied".into()),
     }
 }
 
-fn first_keyword(statement: &str) -> Option<String> {
-    let mut it = SqlTokenizer::new(statement);
-    while let Some(token) = it.next() {
-        if !token.is_empty() {
-            return Some(token.to_ascii_lowercase());
-        }
+fn object_name_to_string(name: &ObjectName) -> Result<String, String> {
+    if name.0.is_empty() {
+        return Err("Permission Denied".into());
     }
-    None
-}
-
-fn extract_table_names(statement: &str) -> Vec<String> {
-    let mut tokens = Vec::new();
-    let mut it = SqlTokenizer::new(statement);
-    while let Some(token) = it.next() {
-        tokens.push(token);
+    if name.0.len() > 1 {
+        return Err("Permission Denied".into());
     }
-
-    let mut tables = Vec::new();
-    let keywords = ["from", "join", "update", "into"];
-
-    for i in 0..tokens.len() {
-        let token = &tokens[i];
-        let lower = token.to_ascii_lowercase();
-        if !keywords.contains(&lower.as_str()) {
-            continue;
-        }
-        if let Some(next) = tokens.get(i + 1) {
-            let next_lower = next.to_ascii_lowercase();
-            if next_lower == "select" || next_lower == "with" {
-                continue;
-            }
-            tables.push(next.clone());
-        }
-    }
-
-    tables
-}
-
-struct SqlTokenizer<'a> {
-    input: &'a [u8],
-    pos: usize,
-}
-
-impl<'a> SqlTokenizer<'a> {
-    fn new(input: &'a str) -> Self {
-        Self {
-            input: input.as_bytes(),
-            pos: 0,
-        }
-    }
-
-    fn next(&mut self) -> Option<String> {
-        self.skip_ws_and_comments();
-        if self.pos >= self.input.len() {
-            return None;
-        }
-
-        let b = self.input[self.pos];
-        if is_ident_start(b) {
-            let start = self.pos;
-            self.pos += 1;
-            while self.pos < self.input.len() && is_ident_char(self.input[self.pos]) {
-                self.pos += 1;
-            }
-            return Some(String::from_utf8_lossy(&self.input[start..self.pos]).into_owned());
-        }
-
-        if b == b'"' || b == b'`' || b == b'[' {
-            return self.read_quoted_ident();
-        }
-
-        if b == b'\'' {
-            self.read_string_literal();
-            return self.next();
-        }
-
-        self.pos += 1;
-        self.next()
-    }
-
-    fn skip_ws_and_comments(&mut self) {
-        loop {
-            while self.pos < self.input.len() && self.input[self.pos].is_ascii_whitespace() {
-                self.pos += 1;
-            }
-            if self.pos + 1 < self.input.len()
-                && self.input[self.pos] == b'-'
-                && self.input[self.pos + 1] == b'-'
-            {
-                self.pos += 2;
-                while self.pos < self.input.len() && self.input[self.pos] != b'\n' {
-                    self.pos += 1;
-                }
-                continue;
-            }
-            if self.pos + 1 < self.input.len()
-                && self.input[self.pos] == b'/'
-                && self.input[self.pos + 1] == b'*'
-            {
-                self.pos += 2;
-                while self.pos + 1 < self.input.len() {
-                    if self.input[self.pos] == b'*' && self.input[self.pos + 1] == b'/' {
-                        self.pos += 2;
-                        break;
-                    }
-                    self.pos += 1;
-                }
-                continue;
-            }
-            break;
-        }
-    }
-
-    fn read_quoted_ident(&mut self) -> Option<String> {
-        let quote = self.input[self.pos];
-        let end_quote = if quote == b'[' { b']' } else { quote };
-        self.pos += 1;
-        let start = self.pos;
-        while self.pos < self.input.len() {
-            if self.input[self.pos] == end_quote {
-                let ident = String::from_utf8_lossy(&self.input[start..self.pos]).into_owned();
-                self.pos += 1;
-                return Some(ident);
-            }
-            self.pos += 1;
-        }
-        Some(String::from_utf8_lossy(&self.input[start..]).into_owned())
-    }
-
-    fn read_string_literal(&mut self) {
-        self.pos += 1;
-        while self.pos < self.input.len() {
-            if self.input[self.pos] == b'\'' {
-                if self.pos + 1 < self.input.len() && self.input[self.pos + 1] == b'\'' {
-                    self.pos += 2;
-                    continue;
-                }
-                self.pos += 1;
-                break;
-            }
-            self.pos += 1;
-        }
-    }
-}
-
-fn is_ident_start(b: u8) -> bool {
-    b.is_ascii_alphabetic() || b == b'_'
-}
-
-fn is_ident_char(b: u8) -> bool {
-    b.is_ascii_alphanumeric() || b == b'_' || b == b'.'
+    Ok(name.0[0].value.clone())
 }
