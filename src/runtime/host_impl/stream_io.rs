@@ -1,4 +1,4 @@
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Cursor, Read, Seek, SeekFrom, Write};
 use wasmtime::component::Resource;
 
 use crate::common::buffer::{BufferType, RealBuffer};
@@ -6,10 +6,10 @@ use crate::runtime::context::{SecurityPolicy, StreamContext};
 
 use super::api;
 
-/// 内部 Trait：抽象化对文件和内存流的统一读取能力
+/// 内部 Trait：抽象化对文件和内存流的同步读取能力
 trait BufferIo {
     fn get_size(&self) -> u64;
-    fn read_at(&mut self, offset: u64, dest: &mut [u8]) -> usize;
+    fn read_at(&mut self, offset: u64, dest: &mut [u8]) -> std::io::Result<usize>;
 }
 
 impl BufferIo for BufferType {
@@ -21,22 +21,24 @@ impl BufferIo for BufferType {
         }
     }
 
-    fn read_at(&mut self, offset: u64, dest: &mut [u8]) -> usize {
+    fn read_at(&mut self, offset: u64, dest: &mut [u8]) -> std::io::Result<usize> {
         match self {
-            BufferType::File(f) => f
-                .seek(SeekFrom::Start(offset))
-                .and_then(|_| f.read(dest))
-                .unwrap_or(0),
-            BufferType::Memory(c) => c
-                .seek(SeekFrom::Start(offset))
-                .and_then(|_| c.read(dest))
-                .unwrap_or(0),
-            BufferType::Pipe(_) => 0,
+            BufferType::File(f) => {
+                f.seek(SeekFrom::Start(offset))?;
+                f.read(dest)
+            }
+            BufferType::Memory(c) => {
+                c.seek(SeekFrom::Start(offset))?;
+                c.read(dest)
+            }
+            BufferType::Pipe(_) => {
+                Err(std::io::Error::new(std::io::ErrorKind::Other, "Pipe does not support synchronous random access"))
+            }
         }
     }
 }
 
-/// 插件侧调用：打开宿主文件资源
+/// 插件侧调用：资源生命周期管理 (Open/Create)
 impl api::stream_io::Host for StreamContext {
     fn open_file(&mut self, uuid: String) -> Result<Resource<RealBuffer>, String> {
         // [安全拦截] 鉴权模式下禁止访问文件系统
@@ -50,7 +52,11 @@ impl api::stream_io::Host for StreamContext {
             .get_path(&uuid)
             .ok_or_else(|| "UUID not found".to_string())?;
 
-        let file = std::fs::File::open(&file_path).map_err(|e| format!("IO Error: {}", e))?;
+        let file = std::fs::File::options()
+            .read(true)
+            .write(true)
+            .open(&file_path)
+            .map_err(|e| format!("IO Error: {}", e))?;
 
         let rb = RealBuffer {
             inner: BufferType::File(file),
@@ -80,7 +86,7 @@ impl api::stream_io::Host for StreamContext {
     }
 }
 
-/// 插件侧调用：缓冲区操作实现
+/// 插件侧调用：缓冲区读写操作实现
 impl api::stream_io::HostBuffer for StreamContext {
     fn size(&mut self, resource: Resource<RealBuffer>) -> u64 {
         self.table
@@ -90,16 +96,98 @@ impl api::stream_io::HostBuffer for StreamContext {
     }
 
     fn read(&mut self, resource: Resource<RealBuffer>, offset: u64, max_bytes: u64) -> Vec<u8> {
-        let mut chunk = vec![0u8; max_bytes as usize];
-
-        let read_len = if let Ok(buffer) = self.table.get_mut(&resource) {
-            buffer.inner.read_at(offset, &mut chunk)
-        } else {
-            0
+        let rb = match self.table.get_mut(&resource) {
+            Ok(b) => b,
+            Err(_) => return vec![],
         };
 
-        chunk.truncate(read_len);
-        chunk
+        let handle = match tokio::runtime::Handle::try_current() {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::error!("Failed to get tokio runtime: {}", e);
+                return vec![];
+            }
+        };
+
+        match &mut rb.inner {
+            BufferType::Pipe(stdout) => {
+                handle.block_on(async {
+                    let mut buf = vec![0u8; max_bytes as usize];
+                    match tokio::io::AsyncReadExt::read(stdout, &mut buf).await {
+                        Ok(n) => {
+                            buf.truncate(n);
+                            buf
+                        }
+                        Err(e) => {
+                            tracing::warn!("Pipe read error: {}", e);
+                            vec![]
+                        }
+                    }
+                })
+            }
+            _ => {
+                // 使用同步 BufferIo 读取
+                let mut chunk = vec![0u8; max_bytes as usize];
+                let read_len = rb.inner.read_at(offset, &mut chunk).unwrap_or(0);
+                chunk.truncate(read_len);
+                chunk
+            }
+        }
+    }
+
+    fn write(&mut self, resource: Resource<RealBuffer>, data: Vec<u8>) -> u64 {
+        let rb = match self.table.get_mut(&resource) {
+            Ok(b) => b,
+            Err(_) => return 0,
+        };
+
+        let handle = match tokio::runtime::Handle::try_current() {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::error!("Failed to get tokio runtime: {}", e);
+                return 0;
+            }
+        };
+
+        handle.block_on(async {
+            // 1. 尝试写入子进程管道 (Async)
+            if let Some(child) = &mut rb.process_handle {
+                if let Some(stdin) = &mut child.stdin {
+                    if let Err(e) = tokio::io::AsyncWriteExt::write_all(stdin, &data).await {
+                        tracing::error!("Failed to write to process stdin: {}", e);
+                        return 0;
+                    }
+                    if let Err(e) = tokio::io::AsyncWriteExt::flush(stdin).await {
+                        tracing::error!("Failed to flush process stdin: {}", e);
+                        return 0;
+                    }
+                    return data.len() as u64;
+                }
+            }
+
+            // 2. 尝试写入 File/Memory (Sync)
+            match &mut rb.inner {
+                BufferType::File(f) => {
+                    use std::io::Seek;
+                    let _ = f.seek(SeekFrom::End(0));
+                    match f.write(&data) {
+                        Ok(n) => n as u64,
+                        Err(_) => 0,
+                    }
+                },
+                BufferType::Memory(c) => {
+                    let _ = c.seek(SeekFrom::End(0));
+                    match c.write(&data) {
+                        Ok(n) => n as u64,
+                        Err(_) => 0,
+                    }
+                },
+                BufferType::Pipe(_) => {
+                    tracing::error!("Cannot write to a standard output pipe (Read-only)");
+                    0
+                }
+            }
+        })
     }
 
     fn drop(&mut self, resource: Resource<RealBuffer>) -> wasmtime::Result<()> {

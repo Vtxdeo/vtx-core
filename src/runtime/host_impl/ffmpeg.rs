@@ -2,6 +2,7 @@ use wasmtime::component::Resource;
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
 use super::api;
+use std::process::Stdio;
 
 impl api::ffmpeg::Host for StreamContext {
     fn execute(
@@ -22,39 +23,49 @@ impl api::ffmpeg::Host for StreamContext {
                 params.profile
             ))?;
 
-        let input_path = self
-            .registry
-            .get_path(&params.input_id)
-            .ok_or_else(|| format!("Input video ID '{}' not found", params.input_id))?;
+        // [Fix] 统一返回类型为 (String, bool)
+        let (input_arg, use_stdin_pipe) = if params.input_id == "pipe:0" {
+            ("pipe:0".to_string(), true)
+        } else {
+            let path = self
+                .registry
+                .get_path(&params.input_id)
+                .ok_or_else(|| format!("Input video ID '{}' not found", params.input_id))?;
+            // 将 PathBuf 转为 String
+            (path.to_string_lossy().to_string(), false)
+        };
 
-        // TODO: 将来在 Process Spawn 逻辑中集成超时控制
         let _timeout_secs = self.vtx_ffmpeg.execution_timeout_secs;
 
         tracing::info!(
-            "[VtxFfmpeg] Spawn: Profile='{}' (Using: {} {}), Input='{}'",
+            "[VtxFfmpeg] Spawn: Profile='{}' (Using: {} {}), Input='{}' (Pipe Mode: {})",
             params.profile,
             binary.profile,
             binary.version,
             params.input_id,
+            use_stdin_pipe
         );
 
         let handle = tokio::runtime::Handle::try_current()
             .map_err(|e| format!("Failed to get tokio runtime: {}", e))?;
 
-        // 异步启动进程
         let binary_path = binary.path.clone();
         let child_result = handle.block_on(async {
             let mut cmd = tokio::process::Command::new(&binary_path);
-            cmd.arg("-i").arg(input_path);
+
+            cmd.arg("-i").arg(&input_arg);
             cmd.args(&params.args);
 
-            // 基础进程配置
-            cmd.stdout(std::process::Stdio::piped());
-            cmd.stderr(std::process::Stdio::inherit()); // 错误日志输出到控制台方便调试
-            cmd.stdin(std::process::Stdio::null());
+            cmd.stdout(Stdio::piped());
+            cmd.stderr(Stdio::inherit());
             cmd.kill_on_drop(true);
 
-            // TODO: 未来在此处集成更复杂的进程池/信号量控制
+            if use_stdin_pipe {
+                cmd.stdin(Stdio::piped());
+            } else {
+                cmd.stdin(Stdio::null());
+            }
+
             cmd.spawn()
         });
 
@@ -68,7 +79,7 @@ impl api::ffmpeg::Host for StreamContext {
         let rb = RealBuffer {
             inner: BufferType::Pipe(stdout),
             path_hint: None,
-            mime_override: Some("video/mp4".to_string()), // 默认 MIME，插件可通过其他方式覆盖
+            mime_override: Some("video/mp4".to_string()),
             process_handle: Some(child),
         };
 
