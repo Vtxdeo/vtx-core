@@ -27,7 +27,8 @@ impl api::ffmpeg::Host for StreamContext {
             .get_path(&params.input_id)
             .ok_or_else(|| format!("Input video ID '{}' not found", params.input_id))?;
 
-        let timeout_secs = self.vtx_ffmpeg.execution_timeout_secs;
+        // TODO: 将来在 Process Spawn 逻辑中集成超时控制
+        let _timeout_secs = self.vtx_ffmpeg.execution_timeout_secs;
 
         tracing::info!(
             "[VtxFfmpeg] Spawn: Profile='{}' (Using: {} {}), Input='{}'",

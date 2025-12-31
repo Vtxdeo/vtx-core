@@ -48,6 +48,12 @@ pub struct VtxFfmpegSettings {
     /// 子进程执行超时时间（单位：秒）
     /// 用于防止异常进程僵死占用系统资源，0 表示不限制（不推荐）
     pub execution_timeout_secs: u64,
+    /// 是否允许回退到系统已安装的 FFmpeg
+    ///
+    /// 若启用且无法在 binary_root 找到合适的 Profile，
+    /// 将尝试调用环境变量 PATH 中的 `ffmpeg` 命令作为兜底方案。
+    #[serde(default)]
+    pub use_system_binary: bool,
 }
 
 impl Settings {
@@ -70,6 +76,8 @@ impl Settings {
             // VtxFfmpeg 默认配置
             .set_default("vtx_ffmpeg.binary_root", "./bin/ffmpeg")?
             .set_default("vtx_ffmpeg.execution_timeout_secs", 600)?
+            // 默认关闭系统级回退，保证行为可预测
+            .set_default("vtx_ffmpeg.use_system_binary", false)?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
             // 环境变量支持（如 VTX_SERVER__PORT=8080）

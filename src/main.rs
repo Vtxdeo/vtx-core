@@ -84,6 +84,7 @@ async fn main() -> anyhow::Result<()> {
     let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(
         settings.vtx_ffmpeg.binary_root.clone(),
         settings.vtx_ffmpeg.execution_timeout_secs,
+        settings.vtx_ffmpeg.use_system_binary,
     ));
 
     // 初始化插件管理器 (传入 vtx_ffmpeg_manager)
