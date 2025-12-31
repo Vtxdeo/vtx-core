@@ -63,7 +63,7 @@ pub async fn load_and_migrate(
 
     info!(
         "[plugin/init] Plugin loaded: {} (v{}) - {}",
-        plugin_id, manifest.version, manifest.name
+        &plugin_id, manifest.version, manifest.name
     );
 
     let declared_resources = plugin.call_get_resources(&mut store).await?;
@@ -90,7 +90,7 @@ pub async fn load_and_migrate(
     if rewritten_migrations.len() > current_ver {
         info!(
             "[plugin/migration] Starting DB migration: {} (v{} -> v{})",
-            plugin_id,
+            &plugin_id,
             current_ver,
             rewritten_migrations.len()
         );
@@ -108,7 +108,7 @@ pub async fn load_and_migrate(
             debug!(
                 "[plugin/migration] Executing migration #{} for {}",
                 idx + 1,
-                plugin_id
+                &plugin_id
             );
 
             // 使用事务句柄执行 SQL
@@ -140,12 +140,12 @@ pub async fn load_and_migrate(
         registry.set_plugin_version(&plugin_id, rewritten_migrations.len());
         info!(
             "[plugin/migration] Migration complete for plugin: {}",
-            plugin_id
+            &plugin_id
         );
     } else {
         info!(
             "[plugin/migration] No migration needed. Plugin '{}' database is up to date.",
-            plugin_id
+            &plugin_id
         );
     }
 
