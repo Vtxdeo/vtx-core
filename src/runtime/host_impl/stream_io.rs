@@ -6,6 +6,7 @@ use crate::runtime::context::{SecurityPolicy, StreamContext};
 
 use super::api;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::task;
 
 /// 内部 Trait：抽象化对文件和内存流的同步读取能力
 trait BufferIo {
@@ -54,11 +55,16 @@ impl api::stream_io::Host for StreamContext {
             .get_path(&uuid)
             .ok_or_else(|| "UUID not found".to_string())?;
 
-        let file = std::fs::File::options()
-            .read(true)
-            .write(true)
-            .open(&file_path)
-            .map_err(|e| format!("IO Error: {}", e))?;
+        let file_path_clone = file_path.clone();
+        let file = task::spawn_blocking(move || {
+            std::fs::File::options()
+                .read(true)
+                .write(true)
+                .open(&file_path_clone)
+        })
+        .await
+        .map_err(|e| format!("IO Join Error: {}", e))?
+        .map_err(|e| format!("IO Error: {}", e))?;
 
         let rb = RealBuffer {
             inner: BufferType::File(file),
@@ -104,40 +110,66 @@ impl api::stream_io::HostBuffer for StreamContext {
         offset: u64,
         max_bytes: u64,
     ) -> Vec<u8> {
-        let rb = match self.table.get_mut(&resource) {
-            Ok(b) => b,
-            Err(_) => return vec![],
-        };
+        let file_clone = {
+            let rb = match self.table.get_mut(&resource) {
+                Ok(b) => b,
+                Err(_) => return vec![],
+            };
 
-        match &mut rb.inner {
-            BufferType::Pipe(stdout) => {
-                let mut buf = vec![0u8; max_bytes as usize];
-                match stdout.read(&mut buf).await {
-                    Ok(n) => {
-                        buf.truncate(n);
-                        buf
-                    }
-                    Err(e) => {
-                        tracing::warn!("Pipe read error: {}", e);
-                        vec![]
+            match &mut rb.inner {
+                BufferType::Pipe(stdout) => {
+                    let mut buf = vec![0u8; max_bytes as usize];
+                    match stdout.read(&mut buf).await {
+                        Ok(n) => {
+                            buf.truncate(n);
+                            return buf;
+                        }
+                        Err(e) => {
+                            tracing::warn!("Pipe read error: {}", e);
+                            return vec![];
+                        }
                     }
                 }
+                BufferType::Memory(_) => {
+                    let mut chunk = vec![0u8; max_bytes as usize];
+                    let read_len = rb.inner.read_at(offset, &mut chunk).unwrap_or(0);
+                    chunk.truncate(read_len);
+                    return chunk;
+                }
+                BufferType::File(f) => match f.try_clone() {
+                    Ok(file) => Some(file),
+                    Err(e) => {
+                        tracing::error!("Failed to clone file handle: {}", e);
+                        None
+                    }
+                },
             }
-            _ => {
-                // 使用同步 BufferIo 读取
-                let mut chunk = vec![0u8; max_bytes as usize];
-                let read_len = rb.inner.read_at(offset, &mut chunk).unwrap_or(0);
-                chunk.truncate(read_len);
-                chunk
+        };
+
+        let Some(file) = file_clone else {
+            return vec![];
+        };
+
+        task::spawn_blocking(move || {
+            let mut file = file;
+            if file.seek(SeekFrom::Start(offset)).is_err() {
+                return vec![];
             }
-        }
+            let mut chunk = vec![0u8; max_bytes as usize];
+            let read_len = file.read(&mut chunk).unwrap_or_else(|_| 0);
+            chunk.truncate(read_len);
+            chunk
+        })
+        .await
+        .unwrap_or_default()
     }
 
     async fn write(&mut self, resource: Resource<RealBuffer>, data: Vec<u8>) -> u64 {
-        let rb = match self.table.get_mut(&resource) {
-            Ok(b) => b,
-            Err(_) => return 0,
-        };
+        let file_clone = {
+            let rb = match self.table.get_mut(&resource) {
+                Ok(b) => b,
+                Err(_) => return 0,
+            };
 
         // 1. 尝试写入子进程管道 (Async)
         if let Some(child) = &mut rb.process_handle {
@@ -154,28 +186,43 @@ impl api::stream_io::HostBuffer for StreamContext {
             }
         }
 
-        // 2. 尝试写入 File/Memory (Sync)
-        match &mut rb.inner {
-            BufferType::File(f) => {
-                use std::io::Seek;
-                let _ = f.seek(SeekFrom::End(0));
-                match f.write(&data) {
-                    Ok(n) => n as u64,
-                    Err(_) => 0,
+            // 2. 尝试写入 File/Memory (Sync)
+            match &mut rb.inner {
+                BufferType::File(f) => match f.try_clone() {
+                    Ok(file) => Some(file),
+                    Err(e) => {
+                        tracing::error!("Failed to clone file handle: {}", e);
+                        None
+                    }
+                },
+                BufferType::Memory(c) => {
+                    let _ = c.seek(SeekFrom::End(0));
+                    return match std::io::Write::write(c, &data) {
+                        Ok(n) => n as u64,
+                        Err(_) => 0,
+                    };
                 }
-            },
-            BufferType::Memory(c) => {
-                let _ = c.seek(SeekFrom::End(0));
-                match std::io::Write::write(c, &data) {
-                    Ok(n) => n as u64,
-                    Err(_) => 0,
+                BufferType::Pipe(_) => {
+                    tracing::error!("Cannot write to a standard output pipe (Read-only)");
+                    return 0;
                 }
-            },
-            BufferType::Pipe(_) => {
-                tracing::error!("Cannot write to a standard output pipe (Read-only)");
-                0
             }
-        }
+        };
+
+        let Some(file) = file_clone else {
+            return 0;
+        };
+
+        task::spawn_blocking(move || {
+            let mut file = file;
+            let _ = file.seek(SeekFrom::End(0));
+            match file.write(&data) {
+                Ok(n) => n as u64,
+                Err(_) => 0,
+            }
+        })
+        .await
+        .unwrap_or(0)
     }
 
     fn drop(&mut self, resource: Resource<RealBuffer>) -> wasmtime::Result<()> {
