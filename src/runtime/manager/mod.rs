@@ -1,4 +1,5 @@
 pub mod loader;
+pub mod migration_policy;
 pub mod watcher;
 
 use serde::Serialize;

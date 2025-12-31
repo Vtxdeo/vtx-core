@@ -2,6 +2,7 @@ use crate::runtime::{
     context::{SecurityPolicy, StreamContext},
     ffmpeg::VtxFfmpegManager,
     host_impl::Plugin,
+    manager::migration_policy,
 };
 use crate::storage::VideoRegistry;
 use anyhow::Context;
@@ -66,15 +67,32 @@ pub async fn load_and_migrate(
     );
 
     let declared_resources = plugin.call_get_resources(&mut store).await?;
+    let normalized_resources =
+        migration_policy::normalize_declared_resources(&plugin_id, declared_resources)
+            .map_err(|e| anyhow::anyhow!("Invalid resource declaration: {}", e))?;
+    let declared_set = normalized_resources
+        .iter()
+        .cloned()
+        .collect::<std::collections::HashSet<_>>();
     let migrations = plugin.call_get_migrations(&mut store).await?;
+    let mut rewritten_migrations = Vec::with_capacity(migrations.len());
+    for sql in migrations {
+        let rewritten = migration_policy::validate_and_rewrite_migration(
+            &plugin_id,
+            &declared_set,
+            &sql,
+        )
+        .map_err(|e| anyhow::anyhow!("Migration rejected: {}", e))?;
+        rewritten_migrations.push(rewritten);
+    }
     let current_ver = registry.get_plugin_version(&plugin_id);
 
-    if migrations.len() > current_ver {
+    if rewritten_migrations.len() > current_ver {
         info!(
             "[plugin/migration] Starting DB migration: {} (v{} -> v{})",
             plugin_id,
             current_ver,
-            migrations.len()
+            rewritten_migrations.len()
         );
 
         // 获取可变连接以启动事务
@@ -86,7 +104,7 @@ pub async fn load_and_migrate(
             .transaction()
             .context("Failed to start database transaction")?;
 
-        for (idx, sql) in migrations.iter().enumerate().skip(current_ver) {
+        for (idx, sql) in rewritten_migrations.iter().enumerate().skip(current_ver) {
             debug!(
                 "[plugin/migration] Executing migration #{} for {}",
                 idx + 1,
@@ -110,7 +128,7 @@ pub async fn load_and_migrate(
             .context("Failed to commit migration transaction")?;
 
         // 迁移成功后注册资源表
-        for table_name in declared_resources {
+        for table_name in normalized_resources {
             registry.register_resource(&plugin_id, "TABLE", &table_name);
             info!(
                 "[plugin/resource] Registered table resource: {}",
@@ -119,7 +137,7 @@ pub async fn load_and_migrate(
         }
 
         // 更新版本号
-        registry.set_plugin_version(&plugin_id, migrations.len());
+        registry.set_plugin_version(&plugin_id, rewritten_migrations.len());
         info!(
             "[plugin/migration] Migration complete for plugin: {}",
             plugin_id
