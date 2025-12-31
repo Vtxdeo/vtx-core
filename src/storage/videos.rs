@@ -37,7 +37,7 @@ pub(crate) fn scan_directory(
     drop(conn); // 释放连接供后续使用
 
     // 并行遍历文件系统
-    let new_videos: Vec<VideoMeta> = WalkDir::new(dir_path)
+    let new_videos: Vec<VideoMeta> = WalkDir::new(&root_path)
         .into_iter()
         .par_bridge()
         .filter_map(Result::ok)

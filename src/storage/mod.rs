@@ -1,5 +1,6 @@
 pub mod database;
 pub mod plugins;
+pub mod scan_roots;
 pub mod videos;
 
 use r2d2::Pool;
@@ -105,6 +106,19 @@ impl VideoRegistry {
     pub fn nuke_plugin(&self, plugin_name: &str) -> anyhow::Result<usize> {
         plugins::nuke_plugin(&self.pool, plugin_name)
     }
+
+    pub fn list_scan_roots(&self) -> anyhow::Result<Vec<PathBuf>> {
+        scan_roots::list_scan_roots(&self.pool)
+    }
+
+    pub fn add_scan_root(&self, path: &PathBuf) -> anyhow::Result<PathBuf> {
+        scan_roots::add_scan_root(&self.pool, path)
+    }
+
+    pub fn remove_scan_root(&self, path: &PathBuf) -> anyhow::Result<PathBuf> {
+        scan_roots::remove_scan_root(&self.pool, path)
+    }
+
 
     // ===============================
     // 高级控制（不推荐常规使用）

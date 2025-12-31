@@ -114,6 +114,9 @@ async fn main() -> anyhow::Result<()> {
             "/admin",
             Router::new()
                 .route("/scan", post(admin::scan_handler))
+                .route("/scan-roots", get(admin::list_scan_roots_handler))
+                .route("/scan-roots", post(admin::add_scan_root_handler))
+                .route("/scan-roots", delete(admin::remove_scan_root_handler))
                 .route("/videos", get(admin::list_handler))
                 .route("/plugins", get(admin::list_plugins_handler))
                 .route("/plugin", delete(admin::uninstall_handler))

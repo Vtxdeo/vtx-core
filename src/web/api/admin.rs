@@ -6,10 +6,16 @@ use axum::{
     Json as AxumJson,
 };
 use serde::Deserialize;
+use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
 pub struct ScanRequest {
+    pub path: String,
+}
+
+#[derive(Deserialize)]
+pub struct ScanRootRequest {
     pub path: String,
 }
 
@@ -26,7 +32,31 @@ pub async fn scan_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRequest>,
 ) -> AxumJson<serde_json::Value> {
-    match state.registry.scan_directory(&payload.path) {
+    let allowed_roots = match state.registry.list_scan_roots() {
+        Ok(roots) => roots,
+        Err(e) => {
+            tracing::error!("[Admin] Scan roots load failed: {}", e);
+            return AxumJson(serde_json::json!({
+                "status": "error",
+                "message": "Failed to load scan roots"
+            }));
+        }
+    };
+
+    let scan_root = match validate_scan_path(&payload.path, &allowed_roots) {
+        Ok(path) => path,
+        Err(message) => {
+            return AxumJson(serde_json::json!({
+                "status": "error",
+                "message": message
+            }))
+        }
+    };
+
+    match state
+        .registry
+        .scan_directory(&scan_root.to_string_lossy())
+    {
         Ok(new_videos) => AxumJson(serde_json::json!({
             "status": "success",
             "scanned_count": new_videos.len(),
@@ -40,6 +70,36 @@ pub async fn scan_handler(
             }))
         }
     }
+}
+
+fn validate_scan_path(
+    requested: &str,
+    allowed_roots: &[PathBuf],
+) -> Result<PathBuf, String> {
+    let resolved = std::fs::canonicalize(requested)
+        .map_err(|_| "Invalid scan path".to_string())?;
+
+    if !resolved.is_dir() {
+        return Err("Scan path must be a directory".into());
+    }
+
+    let mut has_root = false;
+    for root in allowed_roots {
+        let Ok(root_path) = std::fs::canonicalize(root) else {
+            tracing::warn!("[Admin] Invalid scan root: {:?}", root);
+            continue;
+        };
+        has_root = true;
+        if resolved.starts_with(&root_path) {
+            return Ok(resolved);
+        }
+    }
+
+    if !has_root {
+        return Err("Scan roots not configured".into());
+    }
+
+    Err("Scan path not allowed".into())
 }
 
 /// 列表查询接口
@@ -81,6 +141,56 @@ pub async fn uninstall_handler(
         Ok(_) => AxumJson(serde_json::json!({
             "status": "success",
             "message": format!("Plugin '{}' uninstalled", params.plugin_id)
+        })),
+        Err(e) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+pub async fn list_scan_roots_handler(
+    State(state): State<Arc<AppState>>,
+) -> AxumJson<serde_json::Value> {
+    match state.registry.list_scan_roots() {
+        Ok(roots) => AxumJson(serde_json::json!({
+            "status": "success",
+            "count": roots.len(),
+            "data": roots
+        })),
+        Err(e) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+pub async fn add_scan_root_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ScanRootRequest>,
+) -> AxumJson<serde_json::Value> {
+    let path = PathBuf::from(payload.path);
+    match state.registry.add_scan_root(&path) {
+        Ok(resolved) => AxumJson(serde_json::json!({
+            "status": "success",
+            "path": resolved
+        })),
+        Err(e) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+pub async fn remove_scan_root_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<ScanRootRequest>,
+) -> AxumJson<serde_json::Value> {
+    let path = PathBuf::from(payload.path);
+    match state.registry.remove_scan_root(&path) {
+        Ok(resolved) => AxumJson(serde_json::json!({
+            "status": "success",
+            "path": resolved
         })),
         Err(e) => AxumJson(serde_json::json!({
             "status": "error",

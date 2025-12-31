@@ -60,6 +60,12 @@ pub(crate) fn initialize_pool(
                 installed_at TEXT DEFAULT CURRENT_TIMESTAMP
             );",
         ),
+        M::up(
+            "CREATE TABLE IF NOT EXISTS sys_scan_roots (
+                path TEXT PRIMARY KEY,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+        ),
     ]);
 
     if let Err(e) = migrations.to_latest(&mut conn) {
