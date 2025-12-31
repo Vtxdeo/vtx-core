@@ -118,7 +118,8 @@ impl api::stream_io::HostBuffer for StreamContext {
 
             match &mut rb.inner {
                 BufferType::Pipe(stdout) => {
-                    let mut buf = vec![0u8; max_bytes as usize];
+                    let limit = std::cmp::min(max_bytes, self.max_buffer_read_bytes);
+                    let mut buf = vec![0u8; limit as usize];
                     match stdout.read(&mut buf).await {
                         Ok(n) => {
                             buf.truncate(n);
@@ -131,7 +132,8 @@ impl api::stream_io::HostBuffer for StreamContext {
                     }
                 }
                 BufferType::Memory(_) => {
-                    let mut chunk = vec![0u8; max_bytes as usize];
+                    let limit = std::cmp::min(max_bytes, self.max_buffer_read_bytes);
+                    let mut chunk = vec![0u8; limit as usize];
                     let read_len = rb.inner.read_at(offset, &mut chunk).unwrap_or(0);
                     chunk.truncate(read_len);
                     return chunk;
@@ -150,12 +152,13 @@ impl api::stream_io::HostBuffer for StreamContext {
             return vec![];
         };
 
+        let limit = std::cmp::min(max_bytes, self.max_buffer_read_bytes);
         task::spawn_blocking(move || {
             let mut file = file;
             if file.seek(SeekFrom::Start(offset)).is_err() {
                 return vec![];
             }
-            let mut chunk = vec![0u8; max_bytes as usize];
+            let mut chunk = vec![0u8; limit as usize];
             let read_len = file.read(&mut chunk).unwrap_or_else(|_| 0);
             chunk.truncate(read_len);
             chunk

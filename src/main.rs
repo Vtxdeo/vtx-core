@@ -95,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
         linker,
         settings.plugins.auth_provider.clone(),
         vtx_ffmpeg_manager.clone(),
+        settings.plugins.max_buffer_read_mb * 1024 * 1024,
     )
     .await?;
 

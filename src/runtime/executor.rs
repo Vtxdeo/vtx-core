@@ -36,6 +36,7 @@ impl PluginExecutor {
         let plugin_id = runtime.id.clone();
 
         let memory_limit_bytes = state.config.plugins.max_memory_mb as usize * 1024 * 1024;
+        let max_buffer_read_bytes = state.config.plugins.max_buffer_read_mb * 1024 * 1024;
 
         let limits = wasmtime::StoreLimitsBuilder::new()
             .memory_size(memory_limit_bytes)
@@ -44,13 +45,14 @@ impl PluginExecutor {
             .build();
 
         // 注入 vtx_ffmpeg 到上下文
-        let ctx = StreamContext::new_secure(
-            registry,
-            vtx_ffmpeg,
-            limits,
-            SecurityPolicy::Plugin,
-            Some(plugin_id),
-        );
+            let ctx = StreamContext::new_secure(
+                registry,
+                vtx_ffmpeg,
+                limits,
+                SecurityPolicy::Plugin,
+                Some(plugin_id),
+                max_buffer_read_bytes,
+            );
 
         let mut store = Store::new(&engine, ctx);
         store.limiter(|s| &mut s.limiter);

@@ -32,6 +32,8 @@ pub struct PluginSettings {
     pub location: PathBuf,
     /// 单个插件实例允许使用的最大内存（单位：MB），默认 100MB
     pub max_memory_mb: u64,
+    /// 单次 buffer 读取的最大大小（单位：MB），默认 16MB
+    pub max_buffer_read_mb: u64,
     /// 指定用于鉴权的插件 ID
     /// 若设置，系统将直接调用该插件进行鉴权，不再遍历所有插件
     pub auth_provider: Option<String>,
@@ -72,6 +74,8 @@ impl Settings {
             )?
             // 默认限制 100MB 内存
             .set_default("plugins.max_memory_mb", 100)?
+            // 默认限制单次读取 16MB
+            .set_default("plugins.max_buffer_read_mb", 16)?
             // 默认不指定鉴权提供者
             .set_default::<&str, Option<String>>("plugins.auth_provider", None)?
             // VtxFfmpeg 默认配置

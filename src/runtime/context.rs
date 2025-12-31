@@ -26,6 +26,7 @@ pub struct StreamContext {
     pub limiter: wasmtime::StoreLimits,
     pub policy: SecurityPolicy,
     pub plugin_id: Option<String>,
+    pub max_buffer_read_bytes: u64,
     /// VtxFfmpeg 管理器引用
     /// 允许 Host Function 访问工具链配置
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
@@ -39,6 +40,7 @@ impl StreamContext {
         limiter: wasmtime::StoreLimits,
         policy: SecurityPolicy,
         plugin_id: Option<String>,
+        max_buffer_read_bytes: u64,
     ) -> Self {
         let wasi = WasiCtxBuilder::new()
             .inherit_stdio()
@@ -53,6 +55,7 @@ impl StreamContext {
             limiter,
             policy,
             plugin_id,
+            max_buffer_read_bytes,
             vtx_ffmpeg,
         }
     }

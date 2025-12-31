@@ -45,6 +45,7 @@ pub async fn load_and_migrate(
         wasmtime::StoreLimitsBuilder::new().build(),
         SecurityPolicy::Root,
         None,
+        0,
     );
     let mut store = wasmtime::Store::new(engine, ctx);
 

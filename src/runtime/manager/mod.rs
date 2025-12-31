@@ -48,6 +48,7 @@ pub struct PluginManager {
     auth_provider: Option<String>,
     /// VtxFfmpeg 工具链管理器
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    max_buffer_read_bytes: u64,
 }
 
 impl PluginManager {
@@ -58,6 +59,7 @@ impl PluginManager {
         linker: Linker<StreamContext>,
         auth_provider: Option<String>,
         vtx_ffmpeg: Arc<VtxFfmpegManager>,
+        max_buffer_read_bytes: u64,
     ) -> anyhow::Result<Self> {
         if plugin_dir.is_file() {
             warn!(
@@ -93,6 +95,7 @@ impl PluginManager {
             routes: Arc::new(RwLock::new(Vec::new())),
             auth_provider,
             vtx_ffmpeg,
+            max_buffer_read_bytes,
         };
 
         manager.load_all_plugins().await?;
@@ -360,6 +363,7 @@ impl PluginManager {
             limits,
             SecurityPolicy::Restricted,
             Some(runtime.id.clone()),
+            self.max_buffer_read_bytes,
         );
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);
