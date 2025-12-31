@@ -49,6 +49,10 @@ impl api::stream_io::Host for StreamContext {
             tracing::warn!("[Security] Blocked file access: {}", uuid);
             return Err("Permission Denied".into());
         }
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("file:read") {
+            tracing::warn!("[Security] Missing file:read permission: {}", uuid);
+            return Err("Permission Denied".into());
+        }
 
         let file_path = self
             .registry
@@ -80,6 +84,17 @@ impl api::stream_io::Host for StreamContext {
     }
 
     async fn create_memory_buffer(&mut self, data: Vec<u8>) -> Resource<RealBuffer> {
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("buffer:create") {
+            return self
+                .table
+                .push(RealBuffer {
+                    inner: BufferType::Memory(Cursor::new(Vec::new())),
+                    path_hint: None,
+                    mime_override: Some("application/json".to_string()),
+                    process_handle: None,
+                })
+                .expect("Critical: Failed to allocate memory buffer in host table");
+        }
         let rb = RealBuffer {
             inner: BufferType::Memory(Cursor::new(data)),
             path_hint: None,
@@ -168,26 +183,29 @@ impl api::stream_io::HostBuffer for StreamContext {
     }
 
     async fn write(&mut self, resource: Resource<RealBuffer>, data: Vec<u8>) -> u64 {
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("file:write") {
+            return 0;
+        }
         let file_clone = {
             let rb = match self.table.get_mut(&resource) {
                 Ok(b) => b,
                 Err(_) => return 0,
             };
 
-        // 1. 尝试写入子进程管道 (Async)
-        if let Some(child) = &mut rb.process_handle {
-            if let Some(stdin) = &mut child.stdin {
-                if let Err(e) = stdin.write_all(&data).await {
-                    tracing::error!("Failed to write to process stdin: {}", e);
-                    return 0;
+            // 1. 尝试写入子进程管道 (Async)
+            if let Some(child) = &mut rb.process_handle {
+                if let Some(stdin) = &mut child.stdin {
+                    if let Err(e) = stdin.write_all(&data).await {
+                        tracing::error!("Failed to write to process stdin: {}", e);
+                        return 0;
+                    }
+                    if let Err(e) = stdin.flush().await {
+                        tracing::error!("Failed to flush process stdin: {}", e);
+                        return 0;
+                    }
+                    return data.len() as u64;
                 }
-                if let Err(e) = stdin.flush().await {
-                    tracing::error!("Failed to flush process stdin: {}", e);
-                    return 0;
-                }
-                return data.len() as u64;
             }
-        }
 
             // 2. 尝试写入 File/Memory (Sync)
             match &mut rb.inner {

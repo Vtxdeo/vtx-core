@@ -2,6 +2,7 @@ use std::sync::Arc;
 use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::runtime::ffmpeg::VtxFfmpegManager;
+use crate::runtime::bus::EventBus;
 use crate::storage::VideoRegistry;
 
 /// 安全策略等级
@@ -27,9 +28,19 @@ pub struct StreamContext {
     pub policy: SecurityPolicy,
     pub plugin_id: Option<String>,
     pub max_buffer_read_bytes: u64,
+    pub current_user: Option<CurrentUser>,
+    pub event_bus: Arc<EventBus>,
+    pub permissions: std::collections::HashSet<String>,
     /// VtxFfmpeg 管理器引用
     /// 允许 Host Function 访问工具链配置
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CurrentUser {
+    pub user_id: String,
+    pub username: String,
+    pub groups: Vec<String>,
 }
 
 impl StreamContext {
@@ -41,6 +52,9 @@ impl StreamContext {
         policy: SecurityPolicy,
         plugin_id: Option<String>,
         max_buffer_read_bytes: u64,
+        current_user: Option<CurrentUser>,
+        event_bus: Arc<EventBus>,
+        permissions: std::collections::HashSet<String>,
     ) -> Self {
         let wasi = WasiCtxBuilder::new()
             .inherit_stdio()
@@ -56,8 +70,17 @@ impl StreamContext {
             policy,
             plugin_id,
             max_buffer_read_bytes,
+            current_user,
+            event_bus,
+            permissions,
             vtx_ffmpeg,
         }
+    }
+}
+
+impl StreamContext {
+    pub fn has_permission(&self, perm: &str) -> bool {
+        self.permissions.iter().any(|p| p == perm)
     }
 }
 

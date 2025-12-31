@@ -41,6 +41,7 @@ pub async fn gateway_handler(
         sub_path,
         method.to_string(), // 转换为 String 传给 WASM
         query,
+        None,
     )
     .await;
 

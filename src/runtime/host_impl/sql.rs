@@ -1,5 +1,5 @@
 use super::api;
-use crate::runtime::context::StreamContext;
+use crate::runtime::context::{SecurityPolicy, StreamContext};
 use crate::runtime::host_impl::sql_policy::enforce_sql_policy;
 use rusqlite::types::ToSql;
 use serde_json::{Map, Value};
@@ -11,6 +11,11 @@ impl api::sql::Host for StreamContext {
         statement: String,
         params: Vec<api::sql::DbValue>,
     ) -> Result<u64, String> {
+        if self.policy == SecurityPolicy::Plugin
+            && !self.permissions.iter().any(|p| p == "sql:write")
+        {
+            return Err("Permission Denied".into());
+        }
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
 
         let sql_params = convert_params(&params);

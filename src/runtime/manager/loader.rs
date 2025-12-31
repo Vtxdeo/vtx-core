@@ -6,6 +6,9 @@ use crate::runtime::{
 };
 use crate::storage::VideoRegistry;
 use anyhow::Context;
+use configparser::ini::Ini;
+use serde_json;
+use toml;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -18,6 +21,7 @@ use wasmtime::{
 pub struct LoadResult {
     pub plugin_id: String,
     pub manifest: crate::runtime::host_impl::api::types::Manifest,
+    pub policy: super::PluginPolicy,
     pub component: Component,
 }
 
@@ -33,6 +37,7 @@ pub async fn load_and_migrate(
     linker: &Linker<StreamContext>,
     vtx_path: &Path,
     vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    event_bus: Arc<crate::runtime::bus::EventBus>,
 ) -> anyhow::Result<LoadResult> {
     enforce_vtx_only(vtx_path)?;
 
@@ -46,6 +51,9 @@ pub async fn load_and_migrate(
         SecurityPolicy::Root,
         None,
         0,
+        None,
+        event_bus,
+        std::collections::HashSet::new(),
     );
     let mut store = wasmtime::Store::new(engine, ctx);
 
@@ -54,6 +62,8 @@ pub async fn load_and_migrate(
 
     let manifest = plugin.call_get_manifest(&mut store).await?;
     let plugin_id = manifest.id.clone();
+    let policy = parse_manifest_policy(&manifest.description)
+        .map_err(|e| anyhow::anyhow!("Invalid manifest policy: {}", e))?;
 
     if !registry.verify_installation(&plugin_id, vtx_path)? {
         return Err(anyhow::anyhow!(
@@ -153,8 +163,87 @@ pub async fn load_and_migrate(
     Ok(LoadResult {
         plugin_id,
         manifest,
+        policy,
         component,
     })
+}
+
+fn parse_manifest_policy(raw: &str) -> Result<super::PluginPolicy, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Ok(super::PluginPolicy::default());
+    }
+
+    if let Ok(policy) = parse_policy_toml(raw) {
+        return Ok(policy);
+    }
+
+    if let Ok(policy) = parse_policy_ini(raw) {
+        return Ok(policy);
+    }
+
+    Ok(super::PluginPolicy::default())
+}
+
+fn parse_policy_toml(raw: &str) -> Result<super::PluginPolicy, String> {
+    #[derive(serde::Deserialize)]
+    struct Subscriptions {
+        topics: Option<Vec<String>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Capabilities {
+        permissions: Option<Vec<String>>,
+    }
+    #[derive(serde::Deserialize)]
+    struct Policy {
+        subscriptions: Option<Subscriptions>,
+        capabilities: Option<Capabilities>,
+    }
+
+    let parsed: Policy = toml::from_str(raw).map_err(|e| e.to_string())?;
+    Ok(super::PluginPolicy {
+        subscriptions: parsed
+            .subscriptions
+            .and_then(|s| s.topics)
+            .unwrap_or_default(),
+        permissions: parsed
+            .capabilities
+            .and_then(|c| c.permissions)
+            .unwrap_or_default(),
+    })
+}
+
+fn parse_policy_ini(raw: &str) -> Result<super::PluginPolicy, String> {
+    let mut ini = Ini::new();
+    ini.read(raw.to_string()).map_err(|e| e.to_string())?;
+    let mut subscriptions = Vec::new();
+    let mut permissions = Vec::new();
+
+    if let Some(value) = ini.get("subscriptions", "topics") {
+        subscriptions = parse_list_value(&value);
+    }
+    if let Some(value) = ini.get("capabilities", "permissions") {
+        permissions = parse_list_value(&value);
+    }
+
+    Ok(super::PluginPolicy {
+        subscriptions,
+        permissions,
+    })
+}
+
+fn parse_list_value(raw: &str) -> Vec<String> {
+    let trimmed = raw.trim();
+    if trimmed.starts_with('[') {
+        if let Ok(list) = serde_json::from_str::<Vec<String>>(trimmed) {
+            return list.into_iter().filter(|s| !s.trim().is_empty()).collect();
+        }
+    }
+    trimmed
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 fn enforce_vtx_only(path: &Path) -> anyhow::Result<()> {

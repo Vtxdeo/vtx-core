@@ -66,6 +66,17 @@ pub(crate) fn initialize_pool(
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );",
         ),
+        M::up(
+            "CREATE TABLE IF NOT EXISTS sys_event_logs (
+                id TEXT PRIMARY KEY,
+                topic TEXT NOT NULL,
+                source TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                context TEXT NOT NULL,
+                occurred_at INTEGER NOT NULL,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+        ),
     ]);
 
     if let Err(e) = migrations.to_latest(&mut conn) {

@@ -11,6 +11,9 @@ impl api::ffmpeg::Host for StreamContext {
         &mut self,
         params: api::ffmpeg::TranscodeParams,
     ) -> Result<Resource<RealBuffer>, String> {
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("ffmpeg:execute") {
+            return Err("Permission Denied".into());
+        }
         if self.policy == SecurityPolicy::Restricted {
             tracing::warn!("[Security] VtxFfmpeg execution denied (Restricted mode).");
             return Err("Permission Denied: VtxFfmpeg requires root privileges".into());

@@ -40,10 +40,12 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = "0.14"
 
 vtx-format = "0.1.2"
-vtx-protocol = "3.3.0"
+vtx-protocol = "3.4.0"
 futures-util = "0.3.31"
 async-trait = "0.1"
 sqlparser = "0.45"
+toml = "0.8"
+configparser = "1.0"
 
 [build-dependencies]
-vtx-protocol = "3.3.0"
+vtx-protocol = "3.4.0"

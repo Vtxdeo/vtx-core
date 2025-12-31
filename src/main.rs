@@ -14,7 +14,7 @@ use tracing::info;
 use wasmtime::component::Linker;
 
 use crate::config::Settings;
-use crate::runtime::{ffmpeg::VtxFfmpegManager, host_impl::api, manager::PluginManager};
+use crate::runtime::{bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, manager::PluginManager};
 use crate::storage::VideoRegistry;
 use crate::web::{
     api::{admin, plugin},
@@ -77,6 +77,8 @@ async fn main() -> anyhow::Result<()> {
     api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
     api::sql::add_to_linker(&mut linker, |ctx| ctx)?;
     api::ffmpeg::add_to_linker(&mut linker, |ctx| ctx)?;
+    api::context::add_to_linker(&mut linker, |ctx| ctx)?;
+    api::event_bus::add_to_linker(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
 
@@ -88,6 +90,8 @@ async fn main() -> anyhow::Result<()> {
     ));
 
     // 初始化插件管理器 (传入 vtx_ffmpeg_manager)
+    let event_bus = Arc::new(EventBus::new(256));
+
     let plugin_manager = PluginManager::new(
         engine.clone(),
         settings.plugins.location.clone(),
@@ -96,6 +100,8 @@ async fn main() -> anyhow::Result<()> {
         settings.plugins.auth_provider.clone(),
         vtx_ffmpeg_manager.clone(),
         settings.plugins.max_buffer_read_mb * 1024 * 1024,
+        max_memory_bytes as usize,
+        event_bus.clone(),
     )
     .await?;
 
@@ -106,6 +112,7 @@ async fn main() -> anyhow::Result<()> {
         registry,
         config: settings.clone(),
         vtx_ffmpeg: vtx_ffmpeg_manager,
+        event_bus,
     });
 
     // 路由定义

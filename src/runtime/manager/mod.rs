@@ -10,16 +10,19 @@ use tracing::{error, info, warn};
 use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime::Engine;
 
+use crate::runtime::bus::EventBus;
 use crate::runtime::context::{SecurityPolicy, StreamContext};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::Manifest;
 use crate::runtime::host_impl::Plugin;
+use crate::runtime::executor::PluginExecutor;
 use crate::storage::VideoRegistry;
 
 pub struct PluginRuntime {
     pub id: String,
     pub manifest: Manifest,
+    pub policy: PluginPolicy,
     pub instance_pre: InstancePre<StreamContext>,
     #[allow(dead_code)]
     pub component: Component,
@@ -36,6 +39,13 @@ pub struct PluginStatus {
     pub source_path: String,
 }
 
+#[derive(Debug, Clone, Default)]
+pub struct PluginPolicy {
+    pub subscriptions: Vec<String>,
+    #[allow(dead_code)]
+    pub permissions: Vec<String>,
+}
+
 #[derive(Clone)]
 pub struct PluginManager {
     engine: Engine,
@@ -49,6 +59,8 @@ pub struct PluginManager {
     /// VtxFfmpeg 工具链管理器
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
     max_buffer_read_bytes: u64,
+    max_memory_bytes: usize,
+    event_bus: Arc<EventBus>,
 }
 
 impl PluginManager {
@@ -60,6 +72,8 @@ impl PluginManager {
         auth_provider: Option<String>,
         vtx_ffmpeg: Arc<VtxFfmpegManager>,
         max_buffer_read_bytes: u64,
+        max_memory_bytes: usize,
+        event_bus: Arc<EventBus>,
     ) -> anyhow::Result<Self> {
         if plugin_dir.is_file() {
             warn!(
@@ -96,6 +110,8 @@ impl PluginManager {
             auth_provider,
             vtx_ffmpeg,
             max_buffer_read_bytes,
+            max_memory_bytes,
+            event_bus,
         };
 
         manager.load_all_plugins().await?;
@@ -163,6 +179,7 @@ impl PluginManager {
             &self.linker,
             path,
             self.vtx_ffmpeg.clone(),
+            self.event_bus.clone(),
         )
         .await?;
         let instance_pre = self.linker.instantiate_pre(&load_result.component)?;
@@ -170,6 +187,7 @@ impl PluginManager {
         let runtime = Arc::new(PluginRuntime {
             id: load_result.plugin_id.clone(),
             manifest: load_result.manifest.clone(),
+            policy: load_result.policy.clone(),
             instance_pre,
             component: load_result.component,
             source_path: path.to_path_buf(),
@@ -212,6 +230,46 @@ impl PluginManager {
             "[Register] Plugin '{}' registered at route '{}'",
             new_id, new_entrypoint
         );
+
+        let topics = runtime.policy.subscriptions.clone();
+        if !topics.is_empty() {
+            let bus = self.event_bus.clone();
+            let runtime = runtime.clone();
+            let engine = self.engine.clone();
+            let registry = self.registry.clone();
+            let vtx_ffmpeg = self.vtx_ffmpeg.clone();
+            let max_buffer = self.max_buffer_read_bytes;
+            let max_memory = self.max_memory_bytes;
+
+            tokio::spawn(async move {
+                let Some(mut rx) = bus
+                    .register_plugin(&runtime.id, &topics, &runtime.policy.subscriptions)
+                    .await
+                else {
+                    return;
+                };
+                while let Some(event) = rx.recv().await {
+                    if let Err(e) = PluginExecutor::dispatch_event_with(
+                        engine.clone(),
+                        registry.clone(),
+                        vtx_ffmpeg.clone(),
+                        bus.clone(),
+                        max_memory,
+                        max_buffer,
+                        runtime.clone(),
+                        event,
+                    )
+                    .await
+                    {
+                        tracing::error!(
+                            "[EventBus] Dispatch failed for '{}': {}",
+                            runtime.id,
+                            e
+                        );
+                    }
+                }
+            });
+        }
 
         Ok(())
     }
@@ -281,7 +339,14 @@ impl PluginManager {
             self.registry.release_installation(plugin_id)?;
         }
 
-        info!("[Uninstall] Plugin '{}' uninstalled.", plugin_id);
+        let bus = self.event_bus.clone();
+        let plugin_id_owned = plugin_id.to_string();
+        let plugin_id_log = plugin_id_owned.clone();
+        tokio::spawn(async move {
+            bus.unregister_plugin(&plugin_id_owned).await;
+        });
+
+        info!("[Uninstall] Plugin '{}' uninstalled.", plugin_id_log);
         Ok(())
     }
 
@@ -364,6 +429,9 @@ impl PluginManager {
             SecurityPolicy::Restricted,
             Some(runtime.id.clone()),
             self.max_buffer_read_bytes,
+            None,
+            self.event_bus.clone(),
+            runtime.policy.permissions.iter().cloned().collect(),
         );
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);
