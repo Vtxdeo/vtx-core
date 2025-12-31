@@ -50,7 +50,7 @@ pub struct PluginManager {
 }
 
 impl PluginManager {
-    pub fn new(
+    pub async fn new(
         engine: Engine,
         mut plugin_dir: PathBuf,
         registry: VideoRegistry,
@@ -94,7 +94,7 @@ impl PluginManager {
             vtx_ffmpeg,
         };
 
-        manager.load_all_plugins()?;
+        manager.load_all_plugins().await?;
 
         // 确保配置的 auth_provider 确实已加载，防止单点故障导致的系统裸奔或 500 错误
         if let Some(auth_id) = &manager.auth_provider {
@@ -113,12 +113,12 @@ impl PluginManager {
             info!("[Auth] Verified auth_provider '{}' is active.", auth_id);
         }
 
-        watcher::spawn_watcher(manager.clone());
+        watcher::spawn_watcher(manager.clone(), tokio::runtime::Handle::current());
 
         Ok(manager)
     }
 
-    fn load_all_plugins(&self) -> anyhow::Result<()> {
+    async fn load_all_plugins(&self) -> anyhow::Result<()> {
         info!("[PluginManager] Scanning plugins in: {:?}", self.plugin_dir);
         let entries = std::fs::read_dir(&self.plugin_dir).map_err(|e| {
             anyhow::anyhow!(
@@ -133,7 +133,7 @@ impl PluginManager {
         for entry in entries.flatten() {
             let path = entry.path();
             if path.extension().map_or(false, |e| e == "vtx") {
-                match self.load_one(&path) {
+                match self.load_one(&path).await {
                     Ok(_) => loaded_count += 1,
                     Err(e) => error!("[PluginManager] Failed to load {}: {}", path.display(), e),
                 }
@@ -152,14 +152,15 @@ impl PluginManager {
         Ok(())
     }
 
-    pub fn load_one(&self, path: &Path) -> anyhow::Result<()> {
+    pub async fn load_one(&self, path: &Path) -> anyhow::Result<()> {
         let load_result = loader::load_and_migrate(
             &self.engine,
             &self.registry,
             &self.linker,
             path,
             self.vtx_ffmpeg.clone(),
-        )?;
+        )
+        .await?;
         let instance_pre = self.linker.instantiate_pre(&load_result.component)?;
 
         let runtime = Arc::new(PluginRuntime {
@@ -295,7 +296,10 @@ impl PluginManager {
             .collect()
     }
 
-    pub fn verify_identity(&self, headers: &axum::http::HeaderMap) -> Result<UserContext, u16> {
+    pub async fn verify_identity(
+        &self,
+        headers: &axum::http::HeaderMap,
+    ) -> Result<UserContext, u16> {
         let wit_headers: Vec<(String, String)> = headers
             .iter()
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
@@ -305,7 +309,7 @@ impl PluginManager {
         if let Some(provider_id) = &self.auth_provider {
             let plugins = self.plugins.read().unwrap();
             if let Some(runtime) = plugins.get(provider_id) {
-                match self.invoke_authenticate(runtime, &wit_headers) {
+                match self.invoke_authenticate(runtime, &wit_headers).await {
                     Ok(user) => return Ok(user),
                     Err(code) => return Err(code),
                 }
@@ -324,7 +328,7 @@ impl PluginManager {
                 { self.plugins.read().unwrap().values().cloned().collect() };
 
             for plugin_runtime in plugins {
-                match self.invoke_authenticate(&plugin_runtime, &wit_headers) {
+                match self.invoke_authenticate(&plugin_runtime, &wit_headers).await {
                     Ok(user) => return Ok(user),
                     Err(code) => {
                         // 401/403 表示该插件无法处理或拒绝，继续尝试下一个
@@ -339,7 +343,7 @@ impl PluginManager {
         Err(401)
     }
 
-    fn invoke_authenticate(
+    async fn invoke_authenticate(
         &self,
         runtime: &PluginRuntime,
         headers: &[(String, String)],
@@ -359,7 +363,11 @@ impl PluginManager {
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);
 
-        let instance = runtime.instance_pre.instantiate(&mut store).map_err(|e| {
+        let instance = runtime
+            .instance_pre
+            .instantiate_async(&mut store)
+            .await
+            .map_err(|e| {
             error!("[Auth] Instantiation failed: {}", e);
             500u16
         })?;
@@ -368,6 +376,7 @@ impl PluginManager {
 
         plugin
             .call_authenticate(&mut store, headers)
+            .await
             .map_err(|e| {
                 error!("[Auth] Call failed: {}", e);
                 500u16

@@ -42,6 +42,7 @@ config = "0.14"
 vtx-format = "0.1.2"
 vtx-protocol = "3.3.0"
 futures-util = "0.3.31"
+async-trait = "0.1"
 
 [build-dependencies]
 vtx-protocol = "3.3.0"

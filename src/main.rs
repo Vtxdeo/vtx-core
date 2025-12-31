@@ -48,7 +48,7 @@ async fn main() -> anyhow::Result<()> {
     // 基础设施初始化
     let mut wasm_config = wasmtime::Config::new();
     wasm_config.wasm_component_model(true);
-    wasm_config.async_support(false);
+    wasm_config.async_support(true);
 
     let mut pooling_strategy = wasmtime::PoolingAllocationConfig::default();
 
@@ -73,7 +73,7 @@ async fn main() -> anyhow::Result<()> {
 
     let engine = wasmtime::Engine::new(&wasm_config)?;
     let mut linker = Linker::<runtime::context::StreamContext>::new(&engine);
-    wasmtime_wasi::add_to_linker_sync(&mut linker)?;
+    wasmtime_wasi::add_to_linker_async(&mut linker)?;
     api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
     api::sql::add_to_linker(&mut linker, |ctx| ctx)?;
     api::ffmpeg::add_to_linker(&mut linker, |ctx| ctx)?;
@@ -95,7 +95,8 @@ async fn main() -> anyhow::Result<()> {
         linker,
         settings.plugins.auth_provider.clone(),
         vtx_ffmpeg_manager.clone(),
-    )?;
+    )
+    .await?;
 
     // 构造全局状态
     let state = Arc::new(AppState {

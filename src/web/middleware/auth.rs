@@ -19,8 +19,11 @@ pub async fn auth_middleware(
     let headers = req.headers().clone();
     let manager = state.plugin_manager.clone();
 
-    // 在阻塞线程执行插件验证
-    let auth_result = tokio::task::spawn_blocking(move || manager.verify_identity(&headers)).await;
+    let handle = tokio::runtime::Handle::current();
+    let auth_result = tokio::task::spawn_blocking(move || {
+        handle.block_on(async { manager.verify_identity(&headers).await })
+    })
+    .await;
 
     match auth_result {
         Ok(plugin_result) => match plugin_result {

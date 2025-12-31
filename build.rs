@@ -17,7 +17,7 @@ fn main() {
         wasmtime::component::bindgen!({{
             inline: r#"{content}"#,
             world: "plugin",
-            async: false,
+            async: true,
             with: {{
                 "vtx:api/stream-io/buffer": crate::common::buffer::RealBuffer,
             }}

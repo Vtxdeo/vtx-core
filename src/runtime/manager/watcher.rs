@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::mpsc::RecvTimeoutError;
 use std::time::{Duration, Instant};
+use tokio::runtime::Handle;
 use tracing::{error, info};
 
 use super::PluginManager;
@@ -13,7 +14,7 @@ use super::PluginManager;
 /// 1. 聚合短时间内的多次 Modify 事件，避免重复重载。
 /// 2. 只有当文件在指定时间窗口内没有新的变更时，才触发加载逻辑。
 /// 3. Remove 事件拥有最高优先级，会立即取消挂起的重载任务。
-pub fn spawn_watcher(manager: PluginManager) {
+pub fn spawn_watcher(manager: PluginManager, handle: Handle) {
     std::thread::spawn(move || {
         let (tx, rx) = std::sync::mpsc::channel();
 
@@ -57,7 +58,7 @@ pub fn spawn_watcher(manager: PluginManager) {
             }
 
             // 检查是否有挂起的任务达到了防抖时间阈值
-            process_pending_events(&manager, &mut pending_events, debounce_duration);
+            process_pending_events(&manager, &handle, &mut pending_events, debounce_duration);
         }
     });
 }
@@ -88,6 +89,7 @@ fn handle_fs_event(
 /// 扫描挂起队列，执行满足条件的重载任务
 fn process_pending_events(
     manager: &PluginManager,
+    handle: &Handle,
     pending_events: &mut HashMap<PathBuf, Instant>,
     debounce: Duration,
 ) {
@@ -110,8 +112,12 @@ fn process_pending_events(
             "[HotReload] Change stabilized. Reloading plugin: {:?}",
             path
         );
-        if let Err(e) = manager.load_one(&path) {
-            error!("[HotReload] Failed to reload plugin {:?}: {}", path, e);
-        }
+        let manager = manager.clone();
+        let handle = handle.clone();
+        handle.spawn(async move {
+            if let Err(e) = manager.load_one(&path).await {
+                error!("[HotReload] Failed to reload plugin {:?}: {}", path, e);
+            }
+        });
     }
 }

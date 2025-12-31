@@ -26,7 +26,7 @@ pub struct LoadResult {
 /// - 编译 component -> 实例化 -> 获取元数据 -> 校验路径 -> 执行迁移 -> 注册资源
 ///
 /// IO 复杂度：涉及文件读取、Wasm 编译及多次数据库交互，需注意 I/O 延迟。
-pub fn load_and_migrate(
+pub async fn load_and_migrate(
     engine: &Engine,
     registry: &VideoRegistry,
     linker: &Linker<StreamContext>,
@@ -47,9 +47,10 @@ pub fn load_and_migrate(
     );
     let mut store = wasmtime::Store::new(engine, ctx);
 
-    let (plugin, _) = Plugin::instantiate(&mut store, &component, linker)?;
+    let instance = linker.instantiate_async(&mut store, &component).await?;
+    let plugin = Plugin::new(&mut store, &instance)?;
 
-    let manifest = plugin.call_get_manifest(&mut store)?;
+    let manifest = plugin.call_get_manifest(&mut store).await?;
     let plugin_id = manifest.id.clone();
 
     if !registry.verify_installation(&plugin_id, vtx_path)? {
@@ -64,8 +65,8 @@ pub fn load_and_migrate(
         plugin_id, manifest.version, manifest.name
     );
 
-    let declared_resources = plugin.call_get_resources(&mut store)?;
-    let migrations = plugin.call_get_migrations(&mut store)?;
+    let declared_resources = plugin.call_get_resources(&mut store).await?;
+    let migrations = plugin.call_get_migrations(&mut store).await?;
     let current_ver = registry.get_plugin_version(&plugin_id);
 
     if migrations.len() > current_ver {

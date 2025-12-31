@@ -37,54 +37,52 @@ impl PluginExecutor {
 
         let memory_limit_bytes = state.config.plugins.max_memory_mb as usize * 1024 * 1024;
 
-        tokio::task::spawn_blocking(move || {
-            let limits = wasmtime::StoreLimitsBuilder::new()
-                .memory_size(memory_limit_bytes)
-                .instances(5)
-                .tables(1000)
-                .build();
+        let limits = wasmtime::StoreLimitsBuilder::new()
+            .memory_size(memory_limit_bytes)
+            .instances(5)
+            .tables(1000)
+            .build();
 
-            // 注入 vtx_ffmpeg 到上下文
-            let ctx = StreamContext::new_secure(
-                registry,
-                vtx_ffmpeg,
-                limits,
-                SecurityPolicy::Plugin,
-                Some(plugin_id),
-            );
+        // 注入 vtx_ffmpeg 到上下文
+        let ctx = StreamContext::new_secure(
+            registry,
+            vtx_ffmpeg,
+            limits,
+            SecurityPolicy::Plugin,
+            Some(plugin_id),
+        );
 
-            let mut store = Store::new(&engine, ctx);
-            store.limiter(|s| &mut s.limiter);
+        let mut store = Store::new(&engine, ctx);
+        store.limiter(|s| &mut s.limiter);
 
-            let instance = instance_pre
-                .instantiate(&mut store)
-                .map_err(|e| format!("Fast instantiation failed: {}", e))?;
+        let instance = instance_pre
+            .instantiate_async(&mut store)
+            .await
+            .map_err(|e| format!("Fast instantiation failed: {}", e))?;
 
-            let plugin = Plugin::new(&mut store, &instance)
-                .map_err(|e| format!("Plugin binding failed: {}", e))?;
+        let plugin = Plugin::new(&mut store, &instance)
+            .map_err(|e| format!("Plugin binding failed: {}", e))?;
 
-            let req = api::types::HttpRequest {
-                method,
-                path: sub_path,
-                query,
-            };
+        let req = api::types::HttpRequest {
+            method,
+            path: sub_path,
+            query,
+        };
 
-            let response = plugin
-                .call_handle(&mut store, &req)
-                .map_err(|e| format!("Execution failed: {}", e))?;
+        let response = plugin
+            .call_handle(&mut store, &req)
+            .await
+            .map_err(|e| format!("Execution failed: {}", e))?;
 
-            if let Some(resource_handle) = response.body {
-                let buffer = store
-                    .data_mut()
-                    .table
-                    .delete(resource_handle)
-                    .map_err(|_| "Invalid buffer handle".to_string())?;
-                Ok((buffer, response.status))
-            } else {
-                Err("NO_CONTENT".to_string())
-            }
-        })
-        .await
-        .map_err(|e| format!("Task join error: {}", e))?
+        if let Some(resource_handle) = response.body {
+            let buffer = store
+                .data_mut()
+                .table
+                .delete(resource_handle)
+                .map_err(|_| "Invalid buffer handle".to_string())?;
+            Ok((buffer, response.status))
+        } else {
+            Err("NO_CONTENT".to_string())
+        }
     }
 }

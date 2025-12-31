@@ -5,8 +5,9 @@ use crate::runtime::host_impl::ffmpeg_policy::validate_ffmpeg_args;
 use super::api;
 use std::process::Stdio;
 
+#[async_trait::async_trait]
 impl api::ffmpeg::Host for StreamContext {
-    fn execute(
+    async fn execute(
         &mut self,
         params: api::ffmpeg::TranscodeParams,
     ) -> Result<Resource<RealBuffer>, String> {

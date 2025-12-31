@@ -4,8 +4,9 @@ use crate::runtime::host_impl::sql_policy::enforce_sql_policy;
 use rusqlite::types::ToSql;
 use serde_json::{Map, Value};
 
+#[async_trait::async_trait]
 impl api::sql::Host for StreamContext {
-    fn execute(
+    async fn execute(
         &mut self,
         statement: String,
         params: Vec<api::sql::DbValue>,
@@ -25,7 +26,7 @@ impl api::sql::Host for StreamContext {
             .map_err(|e| format!("SQL Error: {}", e))
     }
 
-    fn query_json(
+    async fn query_json(
         &mut self,
         statement: String,
         params: Vec<api::sql::DbValue>,
