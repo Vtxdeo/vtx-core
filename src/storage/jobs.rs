@@ -224,7 +224,8 @@ pub(crate) fn retry_job(
     conn.execute(
         "UPDATE sys_jobs
          SET status = 'queued', error = ?1, updated_at = CURRENT_TIMESTAMP,
-             worker_id = NULL
+             worker_id = NULL, progress = 0, result = NULL, started_at = NULL,
+             finished_at = NULL
          WHERE id = ?2",
         params![error, job_id],
     )?;
