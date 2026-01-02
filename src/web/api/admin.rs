@@ -1,6 +1,6 @@
 use crate::web::state::AppState;
 use axum::{
-    extract::{Json, Query, State},
+    extract::{Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json as AxumJson,
@@ -23,6 +23,18 @@ pub struct ScanRootRequest {
 pub struct UninstallParams {
     pub plugin_id: String,
     pub keep_data: bool,
+}
+
+#[derive(Deserialize)]
+pub struct JobSubmitRequest {
+    pub job_type: String,
+    pub payload: serde_json::Value,
+    pub max_retries: Option<i64>,
+}
+
+#[derive(Deserialize)]
+pub struct JobListParams {
+    pub limit: Option<i64>,
 }
 
 /// 扫描目录接口
@@ -191,6 +203,65 @@ pub async fn remove_scan_root_handler(
         Ok(resolved) => AxumJson(serde_json::json!({
             "status": "success",
             "path": resolved
+        })),
+        Err(e) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+pub async fn submit_job_handler(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<JobSubmitRequest>,
+) -> AxumJson<serde_json::Value> {
+    let max_retries = payload.max_retries.unwrap_or(0);
+    let payload_json = payload.payload.to_string();
+    match state
+        .registry
+        .enqueue_job(&payload.job_type, &payload_json, max_retries)
+    {
+        Ok(job_id) => AxumJson(serde_json::json!({
+            "status": "success",
+            "job_id": job_id
+        })),
+        Err(e) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+pub async fn get_job_handler(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<String>,
+) -> AxumJson<serde_json::Value> {
+    match state.registry.get_job(&job_id) {
+        Ok(Some(job)) => AxumJson(serde_json::json!({
+            "status": "success",
+            "data": job
+        })),
+        Ok(None) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": "Job not found"
+        })),
+        Err(e) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+pub async fn list_jobs_handler(
+    State(state): State<Arc<AppState>>,
+    Query(params): Query<JobListParams>,
+) -> AxumJson<serde_json::Value> {
+    let limit = params.limit.unwrap_or(50).max(1);
+    match state.registry.list_recent_jobs(limit) {
+        Ok(jobs) => AxumJson(serde_json::json!({
+            "status": "success",
+            "count": jobs.len(),
+            "data": jobs
         })),
         Err(e) => AxumJson(serde_json::json!({
             "status": "error",

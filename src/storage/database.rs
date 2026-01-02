@@ -77,6 +77,26 @@ pub(crate) fn initialize_pool(
                 created_at TEXT DEFAULT CURRENT_TIMESTAMP
             );",
         ),
+        M::up(
+            "CREATE TABLE IF NOT EXISTS sys_jobs (
+                id TEXT PRIMARY KEY,
+                job_type TEXT NOT NULL,
+                payload TEXT NOT NULL,
+                status TEXT NOT NULL,
+                progress INTEGER NOT NULL DEFAULT 0,
+                result TEXT,
+                error TEXT,
+                retries INTEGER NOT NULL DEFAULT 0,
+                max_retries INTEGER NOT NULL DEFAULT 0,
+                worker_id TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                started_at TEXT,
+                finished_at TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_jobs_status_created
+            ON sys_jobs(status, created_at);",
+        ),
     ]);
 
     if let Err(e) = migrations.to_latest(&mut conn) {

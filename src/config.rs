@@ -9,6 +9,7 @@ pub struct Settings {
     pub database: DatabaseSettings,
     pub plugins: PluginSettings,
     pub vtx_ffmpeg: VtxFfmpegSettings,
+    pub job_queue: JobQueueSettings,
 }
 
 /// 服务相关配置（监听地址、端口、资源根目录）
@@ -59,6 +60,15 @@ pub struct VtxFfmpegSettings {
     pub use_system_binary: bool,
 }
 
+/// å¼‚æ­¥ä»»åŠ¡é˜Ÿåˆ—é…ç½®
+#[derive(Debug, Deserialize, Clone)]
+pub struct JobQueueSettings {
+    /// æ‰«æé˜Ÿåˆ—çš„è½®è¯¢é—´éš”ï¼ˆmsï¼‰
+    pub poll_interval_ms: u64,
+    /// æœ€å¤§å¹¶å‘ worker æ•°
+    pub max_concurrent: u32,
+}
+
 impl Settings {
     /// 加载配置：支持默认值、可选配置文件、环境变量覆盖
     pub fn new() -> anyhow::Result<Self> {
@@ -83,6 +93,9 @@ impl Settings {
             .set_default("vtx_ffmpeg.execution_timeout_secs", 600)?
             // 默认关闭系统级回退，保证行为可预测
             .set_default("vtx_ffmpeg.use_system_binary", false)?
+            // Job Queue é»˜è®¤é…ç½®
+            .set_default("job_queue.poll_interval_ms", 1500)?
+            .set_default("job_queue.max_concurrent", 1)?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
             // 环境变量支持（如 VTX_SERVER__PORT=8080）

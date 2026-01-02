@@ -14,7 +14,7 @@ use tracing::info;
 use wasmtime::component::Linker;
 
 use crate::config::Settings;
-use crate::runtime::{bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, manager::PluginManager};
+use crate::runtime::{bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, jobs, manager::PluginManager};
 use crate::storage::VideoRegistry;
 use crate::web::{
     api::{admin, plugin, ws},
@@ -115,6 +115,8 @@ async fn main() -> anyhow::Result<()> {
         event_bus,
     });
 
+    jobs::spawn_workers(state.registry.clone(), settings.job_queue.clone());
+
     // 路由定义
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
@@ -129,6 +131,9 @@ async fn main() -> anyhow::Result<()> {
                 .route("/videos", get(admin::list_handler))
                 .route("/plugins", get(admin::list_plugins_handler))
                 .route("/plugin", delete(admin::uninstall_handler))
+                .route("/jobs", post(admin::submit_job_handler))
+                .route("/jobs", get(admin::list_jobs_handler))
+                .route("/jobs/:id", get(admin::get_job_handler))
                 .route("/ws/events", get(ws::ws_handler))
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
