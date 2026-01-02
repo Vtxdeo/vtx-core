@@ -78,6 +78,63 @@ pub(crate) fn get_job(
     }
 }
 
+pub(crate) fn get_job_status(
+    pool: &Pool<SqliteConnectionManager>,
+    job_id: &str,
+) -> anyhow::Result<Option<String>> {
+    let conn = pool.get()?;
+    let mut stmt =
+        conn.prepare_cached("SELECT status FROM sys_jobs WHERE id = ?1")?;
+    let status = stmt.query_row(params![job_id], |row| row.get(0));
+    match status {
+        Ok(status) => Ok(Some(status)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+pub(crate) fn set_job_error(
+    pool: &Pool<SqliteConnectionManager>,
+    job_id: &str,
+    error: &str,
+) -> anyhow::Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "UPDATE sys_jobs SET error = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![error, job_id],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn set_job_result(
+    pool: &Pool<SqliteConnectionManager>,
+    job_id: &str,
+    result: &str,
+) -> anyhow::Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "UPDATE sys_jobs SET result = ?1, updated_at = CURRENT_TIMESTAMP WHERE id = ?2",
+        params![result, job_id],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn set_job_status_terminal(
+    pool: &Pool<SqliteConnectionManager>,
+    job_id: &str,
+    status: &str,
+) -> anyhow::Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "UPDATE sys_jobs
+         SET status = ?1, updated_at = CURRENT_TIMESTAMP,
+             finished_at = CURRENT_TIMESTAMP, lease_expires_at = NULL
+         WHERE id = ?2",
+        params![status, job_id],
+    )?;
+    Ok(())
+}
+
 pub(crate) fn list_recent_jobs(
     pool: &Pool<SqliteConnectionManager>,
     limit: i64,
@@ -319,4 +376,17 @@ pub(crate) fn requeue_expired_leases(
         [],
     )?;
     Ok(rows)
+}
+
+pub(crate) fn count_jobs_by_type_and_status(
+    pool: &Pool<SqliteConnectionManager>,
+    job_type: &str,
+    status: &str,
+) -> anyhow::Result<usize> {
+    let conn = pool.get()?;
+    let mut stmt = conn.prepare_cached(
+        "SELECT COUNT(*) FROM sys_jobs WHERE job_type = ?1 AND status = ?2",
+    )?;
+    let count: i64 = stmt.query_row(params![job_type, status], |row| row.get(0))?;
+    Ok(count as usize)
 }

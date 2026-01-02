@@ -75,6 +75,31 @@ pub struct JobQueueSettings {
     pub lease_secs: u64,
     /// ç§Ÿçº¦å›žæ”¶æ‰«æé—´éš”ï¼ˆmsï¼‰
     pub reclaim_interval_ms: u64,
+    #[serde(default)]
+    pub adaptive_scan: AdaptiveScanSettings,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AdaptiveScanSettings {
+    pub enabled: bool,
+    pub min_concurrent: u32,
+    pub max_concurrent: u32,
+    pub step_up: u32,
+    pub step_down: u32,
+    pub check_interval_ms: u64,
+}
+
+impl Default for AdaptiveScanSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            min_concurrent: 1,
+            max_concurrent: 2,
+            step_up: 1,
+            step_down: 1,
+            check_interval_ms: 2000,
+        }
+    }
 }
 
 impl Settings {
@@ -108,6 +133,12 @@ impl Settings {
             .set_default("job_queue.sweep_interval_ms", 30000)?
             .set_default("job_queue.lease_secs", 120)?
             .set_default("job_queue.reclaim_interval_ms", 15000)?
+            .set_default("job_queue.adaptive_scan.enabled", true)?
+            .set_default("job_queue.adaptive_scan.min_concurrent", 1)?
+            .set_default("job_queue.adaptive_scan.max_concurrent", 2)?
+            .set_default("job_queue.adaptive_scan.step_up", 1)?
+            .set_default("job_queue.adaptive_scan.step_down", 1)?
+            .set_default("job_queue.adaptive_scan.check_interval_ms", 2000)?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
             // 环境变量支持（如 VTX_SERVER__PORT=8080）

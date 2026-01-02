@@ -1,10 +1,11 @@
 use crate::config::JobQueueSettings;
 use crate::runtime::job_registry;
-use crate::storage::VideoRegistry;
+use crate::storage::{VideoRegistry, videos::{ScanOutcome, ScanAbort}};
 use serde::Deserialize;
 use std::time::Duration;
-use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
+use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
 use tokio::time::{sleep, Instant};
+use tokio::sync::{Mutex, Semaphore, OwnedSemaphorePermit};
 use tracing::{error, info, warn};
 
 #[derive(Deserialize)]
@@ -12,11 +13,131 @@ struct ScanDirectoryPayload {
     path: String,
 }
 
+struct AdaptiveScanLimiter {
+    semaphore: Arc<Semaphore>,
+    held: Mutex<Vec<OwnedSemaphorePermit>>,
+    max: usize,
+    target: AtomicUsize,
+}
+
+impl AdaptiveScanLimiter {
+    fn new(max: usize) -> Self {
+        Self {
+            semaphore: Arc::new(Semaphore::new(max)),
+            held: Mutex::new(Vec::new()),
+            max,
+            target: AtomicUsize::new(max),
+        }
+    }
+
+    async fn acquire(&self) -> OwnedSemaphorePermit {
+        self.semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore closed")
+    }
+
+    async fn set_target(&self, target: usize) {
+        let target = target.clamp(1, self.max);
+        self.target.store(target, Ordering::Relaxed);
+        let desired_held = self.max.saturating_sub(target);
+        let mut held = self.held.lock().await;
+        while held.len() > desired_held {
+            held.pop();
+        }
+        while held.len() < desired_held {
+            match self.semaphore.clone().try_acquire_owned() {
+                Ok(permit) => held.push(permit),
+                Err(_) => break,
+            }
+        }
+    }
+
+    fn current_target(&self) -> usize {
+        self.target.load(Ordering::Relaxed)
+    }
+}
+
 pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
     let workers = std::cmp::max(1, settings.max_concurrent) as usize;
+    let adaptive = settings.adaptive_scan.clone();
+    let scan_limiter = if adaptive.enabled {
+        let max = std::cmp::max(adaptive.min_concurrent, adaptive.max_concurrent) as usize;
+        Some(Arc::new(AdaptiveScanLimiter::new(max)))
+    } else {
+        None
+    };
+
+    if let Some(limiter) = scan_limiter.clone() {
+        let registry = registry.clone();
+        tokio::spawn(async move {
+            let min = std::cmp::max(1, adaptive.min_concurrent) as usize;
+            let max = std::cmp::max(min, adaptive.max_concurrent) as usize;
+            let mut target = min;
+            limiter.set_target(target).await;
+            let interval = Duration::from_millis(std::cmp::max(200, adaptive.check_interval_ms));
+            loop {
+                sleep(interval).await;
+                let queued_result = tokio::task::spawn_blocking({
+                    let registry = registry.clone();
+                    move || registry.count_jobs_by_type_and_status("scan-directory", "queued")
+                })
+                .await;
+                let running_result = tokio::task::spawn_blocking({
+                    let registry = registry.clone();
+                    move || registry.count_jobs_by_type_and_status("scan-directory", "running")
+                })
+                .await;
+
+                let queued = match queued_result {
+                    Ok(Ok(count)) => count,
+                    Ok(Err(e)) => {
+                        warn!("[Jobs] Adaptive scan queued count failed: {}", e);
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!("[Jobs] Adaptive scan queued count join error: {}", e);
+                        continue;
+                    }
+                };
+                let running = match running_result {
+                    Ok(Ok(count)) => count,
+                    Ok(Err(e)) => {
+                        warn!("[Jobs] Adaptive scan running count failed: {}", e);
+                        continue;
+                    }
+                    Err(e) => {
+                        warn!("[Jobs] Adaptive scan running count join error: {}", e);
+                        continue;
+                    }
+                };
+
+                let mut desired = target;
+                if queued >= target && target < max {
+                    desired = std::cmp::min(max, target + adaptive.step_up as usize);
+                } else if queued == 0 && running < target {
+                    desired = target.saturating_sub(adaptive.step_down as usize).max(min);
+                }
+
+                if desired != target {
+                    target = desired;
+                    limiter.set_target(target).await;
+                    info!(
+                        "[Jobs] Adaptive scan concurrency set to {} (queued {}, running {})",
+                        target, queued, running
+                    );
+                } else if limiter.current_target() != target {
+                    limiter.set_target(target).await;
+                }
+            }
+        });
+    }
+
     for idx in 0..workers {
         let worker_id = format!("worker-{}", idx + 1);
         let registry = registry.clone();
+        let scan_limiter = scan_limiter.clone();
         let poll_interval = Duration::from_millis(settings.poll_interval_ms);
         let timeout_secs = settings.timeout_secs;
         let sweep_interval = Duration::from_millis(settings.sweep_interval_ms);
@@ -105,13 +226,24 @@ pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
                         });
 
                         let registry_for_job = registry.clone();
+                        let scan_permit = if job_type == "scan-directory" {
+                            if let Some(limiter) = scan_limiter.clone() {
+                                Some(limiter.acquire().await)
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        };
                         let handle_result = tokio::task::spawn_blocking(move || {
+                            let _permit = scan_permit;
                             handle_job(
                                 &registry_for_job,
                                 &job_id,
                                 &job_type,
                                 &payload,
                                 payload_version,
+                                timeout_secs,
                             )
                         })
                         .await;
@@ -201,6 +333,7 @@ fn handle_job(
     job_type: &str,
     payload: &str,
     payload_version: i64,
+    timeout_secs: u64,
 ) -> Result<(), String> {
     let payload_value: serde_json::Value =
         serde_json::from_str(payload).map_err(|e| format!("Invalid payload: {}", e))?;
@@ -212,7 +345,7 @@ fn handle_job(
                 .complete_job(job_id, r#"{"status":"ok"}"#)
                 .map_err(|e| e.to_string())
         }
-        "scan-directory" => handle_scan_directory(registry, job_id, &normalized_payload),
+        "scan-directory" => handle_scan_directory(registry, job_id, &normalized_payload, timeout_secs),
         _ => Err("unsupported job_type".into()),
     }
 }
@@ -221,6 +354,7 @@ fn handle_scan_directory(
     registry: &VideoRegistry,
     job_id: &str,
     payload: &serde_json::Value,
+    timeout_secs: u64,
 ) -> Result<(), String> {
     let payload: ScanDirectoryPayload = serde_json::from_value(payload.clone())
         .map_err(|e| format!("Invalid payload: {}", e))?;
@@ -229,8 +363,65 @@ fn handle_scan_directory(
         .map_err(|e| format!("Load scan roots failed: {}", e))?;
     let scan_root = validate_scan_path(&payload.path, &allowed_roots)?;
 
-    match registry.scan_directory(&scan_root.to_string_lossy()) {
-        Ok(new_videos) => {
+    let running = Arc::new(AtomicBool::new(true));
+    let abort_reason = Arc::new(AtomicUsize::new(0));
+    let done = Arc::new(AtomicBool::new(false));
+
+    let monitor = {
+        let registry = registry.clone();
+        let job_id = job_id.to_string();
+        let running = running.clone();
+        let abort_reason = abort_reason.clone();
+        let done = done.clone();
+        let deadline = Instant::now() + Duration::from_secs(timeout_secs);
+        std::thread::spawn(move || {
+            let poll = Duration::from_secs(1);
+            while !done.load(Ordering::Relaxed) {
+                if Instant::now() >= deadline {
+                    abort_reason.store(2, Ordering::Relaxed);
+                    running.store(false, Ordering::Relaxed);
+                    break;
+                }
+                match registry.get_job_status(&job_id) {
+                    Ok(Some(status)) => {
+                        if status != "running" {
+                            abort_reason.store(1, Ordering::Relaxed);
+                            running.store(false, Ordering::Relaxed);
+                            break;
+                        }
+                    }
+                    Ok(None) => {
+                        abort_reason.store(1, Ordering::Relaxed);
+                        running.store(false, Ordering::Relaxed);
+                        break;
+                    }
+                    Err(err) => {
+                        warn!("[Jobs] scan-directory status check failed: {}", err);
+                    }
+                }
+                std::thread::sleep(poll);
+            }
+        })
+    };
+
+    let outcome = registry
+        .scan_directory_with_abort(&scan_root.to_string_lossy(), || {
+            if running.load(Ordering::Relaxed) {
+                Ok(())
+            } else {
+                match abort_reason.load(Ordering::Relaxed) {
+                    2 => Err(ScanAbort::TimedOut),
+                    _ => Err(ScanAbort::Canceled),
+                }
+            }
+        })
+        .map_err(|e| format!("Scan failed: {}", e))?;
+
+    done.store(true, Ordering::Relaxed);
+    let _ = monitor.join();
+
+    match outcome {
+        ScanOutcome::Completed(new_videos) => {
             let result = serde_json::json!({
                 "scanned_count": new_videos.len(),
             });
@@ -240,7 +431,21 @@ fn handle_scan_directory(
             info!("[Jobs] scan-directory completed: {} new videos", new_videos.len());
             Ok(())
         }
-        Err(e) => Err(format!("Scan failed: {}", e)),
+        ScanOutcome::Aborted(ScanAbort::Canceled) => {
+            let _ = registry.set_job_error(job_id, "canceled");
+            let _ = registry.set_job_result(job_id, r#"{"status":"canceled"}"#);
+            let _ = registry.update_job_progress(job_id, 0);
+            let _ = registry.set_job_status_terminal(job_id, "canceled");
+            info!("[Jobs] scan-directory canceled");
+            Ok(())
+        }
+        ScanOutcome::Aborted(ScanAbort::TimedOut) => {
+            let _ = registry.set_job_error(job_id, "timeout");
+            let _ = registry.set_job_result(job_id, r#"{"status":"timeout"}"#);
+            let _ = registry.update_job_progress(job_id, 0);
+            let _ = registry.set_job_status_terminal(job_id, "failed");
+            Err("timeout".into())
+        }
     }
 }
 

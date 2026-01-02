@@ -51,6 +51,17 @@ impl VideoRegistry {
         videos::scan_directory(&self.pool, dir_path)
     }
 
+    pub fn scan_directory_with_abort<F>(
+        &self,
+        dir_path: &str,
+        should_continue: F,
+    ) -> anyhow::Result<videos::ScanOutcome>
+    where
+        F: Fn() -> Result<(), videos::ScanAbort> + Send + Sync,
+    {
+        videos::scan_directory_with_abort(&self.pool, dir_path, should_continue)
+    }
+
     /// 查询数据库中所有视频元数据
     pub fn list_all(&self) -> anyhow::Result<Vec<VideoMeta>> {
         videos::list_all(&self.pool)
@@ -132,6 +143,22 @@ impl VideoRegistry {
         jobs::get_job(&self.pool, job_id)
     }
 
+    pub fn get_job_status(&self, job_id: &str) -> anyhow::Result<Option<String>> {
+        jobs::get_job_status(&self.pool, job_id)
+    }
+
+    pub fn set_job_error(&self, job_id: &str, error: &str) -> anyhow::Result<()> {
+        jobs::set_job_error(&self.pool, job_id, error)
+    }
+
+    pub fn set_job_result(&self, job_id: &str, result: &str) -> anyhow::Result<()> {
+        jobs::set_job_result(&self.pool, job_id, result)
+    }
+
+    pub fn set_job_status_terminal(&self, job_id: &str, status: &str) -> anyhow::Result<()> {
+        jobs::set_job_status_terminal(&self.pool, job_id, status)
+    }
+
     pub fn list_recent_jobs(&self, limit: i64) -> anyhow::Result<Vec<jobs::JobRecord>> {
         jobs::list_recent_jobs(&self.pool, limit)
     }
@@ -174,6 +201,14 @@ impl VideoRegistry {
 
     pub fn requeue_expired_job_leases(&self) -> anyhow::Result<usize> {
         jobs::requeue_expired_leases(&self.pool)
+    }
+
+    pub fn count_jobs_by_type_and_status(
+        &self,
+        job_type: &str,
+        status: &str,
+    ) -> anyhow::Result<usize> {
+        jobs::count_jobs_by_type_and_status(&self.pool, job_type, status)
     }
     // ===============================
     // 高级控制（不推荐常规使用�?

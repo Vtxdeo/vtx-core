@@ -10,15 +10,39 @@ use uuid::Uuid;
 use walkdir::WalkDir;
 
 /// 扫描目录并更新视频库
+pub(crate) enum ScanAbort {
+    Canceled,
+    TimedOut,
+}
+
+pub(crate) enum ScanOutcome {
+    Completed(Vec<VideoMeta>),
+    Aborted(ScanAbort),
+}
+
 pub(crate) fn scan_directory(
     pool: &Pool<SqliteConnectionManager>,
     dir_path: &str,
 ) -> anyhow::Result<Vec<VideoMeta>> {
+    match scan_directory_with_abort(pool, dir_path, || Ok(()))? {
+        ScanOutcome::Completed(videos) => Ok(videos),
+        ScanOutcome::Aborted(_) => Ok(Vec::new()),
+    }
+}
+
+pub(crate) fn scan_directory_with_abort<F>(
+    pool: &Pool<SqliteConnectionManager>,
+    dir_path: &str,
+    should_continue: F,
+) -> anyhow::Result<ScanOutcome>
+where
+    F: Fn() -> Result<(), ScanAbort> + Send + Sync,
+{
     let conn = pool
         .get()
         .map_err(|e| anyhow::anyhow!("DB Connection failed: {}", e))?;
 
-    // 路径解析与安全校验
+    // ???????????????????????????
     let root_path = std::fs::canonicalize(dir_path).map_err(|e| {
         error!("[scanner] failed to resolve scan root: {}", e);
         anyhow::anyhow!("Invalid directory path: {}", e)
@@ -26,7 +50,7 @@ pub(crate) fn scan_directory(
 
     info!("[scanner] start scanning directory: {:?}", root_path);
 
-    // 预读缓存，用于内存判重
+    // ?????????????????????????????????
     let mut stmt = conn.prepare("SELECT full_path FROM videos")?;
     let existing_paths: HashSet<String> = stmt
         .query_map([], |row| row.get(0))?
@@ -34,44 +58,59 @@ pub(crate) fn scan_directory(
         .collect();
 
     drop(stmt);
-    drop(conn); // 释放连接供后续使用
+    drop(conn); // ???????????????????????????
 
-    // 并行遍历文件系统
-    let new_videos: Vec<VideoMeta> = WalkDir::new(&root_path)
+    // ????????????????????????
+    let new_videos_result: Result<Vec<VideoMeta>, ScanAbort> = WalkDir::new(&root_path)
         .into_iter()
         .par_bridge()
         .filter_map(Result::ok)
         .filter(|entry| entry.path().is_file())
-        .filter_map(|entry| {
+        .map(|entry| {
+            should_continue()?;
             let path = entry.path();
             let ext = path.extension()?.to_string_lossy().to_lowercase();
             if !["mp4", "mkv", "mov", "avi", "webm"].contains(&ext.as_str()) {
-                return None;
+                return Ok(None);
             }
 
             let real_path = std::fs::canonicalize(path).ok()?;
             let full_path_str = real_path.to_string_lossy().to_string();
 
-            // 防御软链接逃逸
+            // ?????????????????????
             if !real_path.starts_with(&root_path) {
                 warn!("[scanner] symlink outside root skipped: {:?}", real_path);
-                return None;
+                return Ok(None);
             }
 
             if existing_paths.contains(&full_path_str) {
-                return None;
+                return Ok(None);
             }
 
-            Some(VideoMeta {
+            Ok(Some(VideoMeta {
                 id: Uuid::new_v4().to_string(),
                 filename: path.file_name()?.to_string_lossy().to_string(),
                 full_path: real_path,
                 created_at: "Just Now".to_string(),
-            })
+            }))
         })
-        .collect();
+        .try_fold(Vec::new, |mut acc, item| {
+            if let Some(video) = item? {
+                acc.push(video);
+            }
+            Ok(acc)
+        })
+        .try_reduce(Vec::new, |mut acc, other| {
+            acc.extend(other);
+            Ok(acc)
+        });
 
-    // 批量写入
+    let new_videos = match new_videos_result {
+        Ok(videos) => videos,
+        Err(abort) => return Ok(ScanOutcome::Aborted(abort)),
+    };
+
+    // ????????????
     if !new_videos.is_empty() {
         let mut conn = pool.get()?;
         let tx = conn.transaction()?;
@@ -96,10 +135,9 @@ pub(crate) fn scan_directory(
         );
     }
 
-    Ok(new_videos)
+    Ok(ScanOutcome::Completed(new_videos))
 }
 
-/// 全量列出视频
 pub(crate) fn list_all(pool: &Pool<SqliteConnectionManager>) -> anyhow::Result<Vec<VideoMeta>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
