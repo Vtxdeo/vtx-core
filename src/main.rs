@@ -17,7 +17,7 @@ use crate::config::Settings;
 use crate::runtime::{bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, manager::PluginManager};
 use crate::storage::VideoRegistry;
 use crate::web::{
-    api::{admin, plugin},
+    api::{admin, plugin, ws},
     middleware::auth::auth_middleware,
     state::AppState,
 };
@@ -129,6 +129,7 @@ async fn main() -> anyhow::Result<()> {
                 .route("/videos", get(admin::list_handler))
                 .route("/plugins", get(admin::list_plugins_handler))
                 .route("/plugin", delete(admin::uninstall_handler))
+                .route("/ws/events", get(ws::ws_handler))
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     auth_middleware,

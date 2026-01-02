@@ -1,5 +1,6 @@
 use crate::common::events::VtxEvent;
 use std::collections::HashMap;
+use std::collections::HashSet;
 use tokio::sync::{mpsc, RwLock};
 
 #[derive(Debug)]
@@ -68,15 +69,26 @@ impl EventBus {
 
     pub async fn publish(&self, event: VtxEvent) -> usize {
         let subs = self.subscriptions.read().await;
-        let Some(targets) = subs.get(&event.topic) else {
+        let mut targets = HashSet::new();
+        if let Some(topic_targets) = subs.get(&event.topic) {
+            for id in topic_targets {
+                targets.insert(id.clone());
+            }
+        }
+        if let Some(wildcard_targets) = subs.get("*") {
+            for id in wildcard_targets {
+                targets.insert(id.clone());
+            }
+        }
+        if targets.is_empty() {
             return 0;
-        };
+        }
 
         let queues = self.queues.read().await;
         let mut delivered = 0usize;
 
         for plugin_id in targets {
-            if let Some(tx) = queues.get(plugin_id) {
+            if let Some(tx) = queues.get(&plugin_id) {
                 if tx.send(event.clone()).await.is_ok() {
                     delivered += 1;
                 }
