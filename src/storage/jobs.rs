@@ -9,6 +9,7 @@ pub struct JobRecord {
     pub id: String,
     pub job_type: String,
     pub payload: String,
+    pub payload_version: i64,
     pub status: String,
     pub progress: i64,
     pub result: Option<String>,
@@ -20,20 +21,22 @@ pub struct JobRecord {
     pub started_at: Option<String>,
     pub finished_at: Option<String>,
     pub worker_id: Option<String>,
+    pub lease_expires_at: Option<i64>,
 }
 
 pub(crate) fn enqueue_job(
     pool: &Pool<SqliteConnectionManager>,
     job_type: &str,
     payload: &str,
+    payload_version: i64,
     max_retries: i64,
 ) -> anyhow::Result<String> {
     let conn = pool.get()?;
     let job_id = Uuid::new_v4().to_string();
     conn.execute(
-        "INSERT INTO sys_jobs (id, job_type, payload, status, progress, retries, max_retries)
-         VALUES (?1, ?2, ?3, 'queued', 0, 0, ?4)",
-        params![job_id, job_type, payload, max_retries],
+        "INSERT INTO sys_jobs (id, job_type, payload, payload_version, status, progress, retries, max_retries)
+         VALUES (?1, ?2, ?3, ?4, 'queued', 0, 0, ?5)",
+        params![job_id, job_type, payload, payload_version, max_retries],
     )?;
     Ok(job_id)
 }
@@ -44,8 +47,8 @@ pub(crate) fn get_job(
 ) -> anyhow::Result<Option<JobRecord>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare_cached(
-        "SELECT id, job_type, payload, status, progress, result, error, retries, max_retries,
-                created_at, updated_at, started_at, finished_at, worker_id
+        "SELECT id, job_type, payload, payload_version, status, progress, result, error, retries, max_retries,
+                created_at, updated_at, started_at, finished_at, worker_id, lease_expires_at
          FROM sys_jobs WHERE id = ?1",
     )?;
     let record = stmt.query_row(params![job_id], |row| {
@@ -53,17 +56,19 @@ pub(crate) fn get_job(
             id: row.get(0)?,
             job_type: row.get(1)?,
             payload: row.get(2)?,
-            status: row.get(3)?,
-            progress: row.get(4)?,
-            result: row.get(5)?,
-            error: row.get(6)?,
-            retries: row.get(7)?,
-            max_retries: row.get(8)?,
-            created_at: row.get(9)?,
-            updated_at: row.get(10)?,
-            started_at: row.get(11)?,
-            finished_at: row.get(12)?,
-            worker_id: row.get(13)?,
+            payload_version: row.get(3)?,
+            status: row.get(4)?,
+            progress: row.get(5)?,
+            result: row.get(6)?,
+            error: row.get(7)?,
+            retries: row.get(8)?,
+            max_retries: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+            started_at: row.get(12)?,
+            finished_at: row.get(13)?,
+            worker_id: row.get(14)?,
+            lease_expires_at: row.get(15)?,
         })
     });
     match record {
@@ -79,8 +84,8 @@ pub(crate) fn list_recent_jobs(
 ) -> anyhow::Result<Vec<JobRecord>> {
     let conn = pool.get()?;
     let mut stmt = conn.prepare(
-        "SELECT id, job_type, payload, status, progress, result, error, retries, max_retries,
-                created_at, updated_at, started_at, finished_at, worker_id
+        "SELECT id, job_type, payload, payload_version, status, progress, result, error, retries, max_retries,
+                created_at, updated_at, started_at, finished_at, worker_id, lease_expires_at
          FROM sys_jobs ORDER BY created_at DESC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![limit], |row| {
@@ -88,17 +93,19 @@ pub(crate) fn list_recent_jobs(
             id: row.get(0)?,
             job_type: row.get(1)?,
             payload: row.get(2)?,
-            status: row.get(3)?,
-            progress: row.get(4)?,
-            result: row.get(5)?,
-            error: row.get(6)?,
-            retries: row.get(7)?,
-            max_retries: row.get(8)?,
-            created_at: row.get(9)?,
-            updated_at: row.get(10)?,
-            started_at: row.get(11)?,
-            finished_at: row.get(12)?,
-            worker_id: row.get(13)?,
+            payload_version: row.get(3)?,
+            status: row.get(4)?,
+            progress: row.get(5)?,
+            result: row.get(6)?,
+            error: row.get(7)?,
+            retries: row.get(8)?,
+            max_retries: row.get(9)?,
+            created_at: row.get(10)?,
+            updated_at: row.get(11)?,
+            started_at: row.get(12)?,
+            finished_at: row.get(13)?,
+            worker_id: row.get(14)?,
+            lease_expires_at: row.get(15)?,
         })
     })?;
 
@@ -112,13 +119,14 @@ pub(crate) fn list_recent_jobs(
 pub(crate) fn claim_next_job(
     pool: &Pool<SqliteConnectionManager>,
     worker_id: &str,
+    lease_secs: u64,
 ) -> anyhow::Result<Option<JobRecord>> {
     let mut conn = pool.get()?;
     let tx = conn.transaction()?;
     let job = {
         let mut stmt = tx.prepare(
-            "SELECT id, job_type, payload, status, progress, result, error, retries, max_retries,
-                    created_at, updated_at, started_at, finished_at, worker_id
+            "SELECT id, job_type, payload, payload_version, status, progress, result, error, retries, max_retries,
+                    created_at, updated_at, started_at, finished_at, worker_id, lease_expires_at
              FROM sys_jobs WHERE status = 'queued' ORDER BY created_at ASC LIMIT 1",
         )?;
         let record = stmt.query_row([], |row| {
@@ -126,17 +134,19 @@ pub(crate) fn claim_next_job(
                 id: row.get(0)?,
                 job_type: row.get(1)?,
                 payload: row.get(2)?,
-                status: row.get(3)?,
-                progress: row.get(4)?,
-                result: row.get(5)?,
-                error: row.get(6)?,
-                retries: row.get(7)?,
-                max_retries: row.get(8)?,
-                created_at: row.get(9)?,
-                updated_at: row.get(10)?,
-                started_at: row.get(11)?,
-                finished_at: row.get(12)?,
-                worker_id: row.get(13)?,
+                payload_version: row.get(3)?,
+                status: row.get(4)?,
+                progress: row.get(5)?,
+                result: row.get(6)?,
+                error: row.get(7)?,
+                retries: row.get(8)?,
+                max_retries: row.get(9)?,
+                created_at: row.get(10)?,
+                updated_at: row.get(11)?,
+                started_at: row.get(12)?,
+                finished_at: row.get(13)?,
+                worker_id: row.get(14)?,
+                lease_expires_at: row.get(15)?,
             })
         });
         match record {
@@ -154,9 +164,9 @@ pub(crate) fn claim_next_job(
     let updated = tx.execute(
         "UPDATE sys_jobs
          SET status = 'running', worker_id = ?1, started_at = CURRENT_TIMESTAMP,
-             updated_at = CURRENT_TIMESTAMP
-         WHERE id = ?2 AND status = 'queued'",
-        params![worker_id, job.id],
+             updated_at = CURRENT_TIMESTAMP, lease_expires_at = strftime('%s','now') + ?2
+         WHERE id = ?3 AND status = 'queued'",
+        params![worker_id, lease_secs as i64, job.id],
     )?;
 
     if updated == 0 {
@@ -167,6 +177,7 @@ pub(crate) fn claim_next_job(
     tx.commit()?;
     job.status = "running".to_string();
     job.worker_id = Some(worker_id.to_string());
+    job.lease_expires_at = None;
     Ok(Some(job))
 }
 
@@ -192,8 +203,8 @@ pub(crate) fn complete_job(
     conn.execute(
         "UPDATE sys_jobs
          SET status = 'succeeded', result = ?1, updated_at = CURRENT_TIMESTAMP,
-             finished_at = CURRENT_TIMESTAMP, progress = 100
-         WHERE id = ?2",
+             finished_at = CURRENT_TIMESTAMP, progress = 100, lease_expires_at = NULL
+         WHERE id = ?2 AND status = 'running'",
         params![result, job_id],
     )?;
     Ok(())
@@ -208,8 +219,8 @@ pub(crate) fn fail_job(
     conn.execute(
         "UPDATE sys_jobs
          SET status = 'failed', error = ?1, updated_at = CURRENT_TIMESTAMP,
-             finished_at = CURRENT_TIMESTAMP
-         WHERE id = ?2",
+             finished_at = CURRENT_TIMESTAMP, lease_expires_at = NULL
+         WHERE id = ?2 AND status = 'running'",
         params![error, job_id],
     )?;
     Ok(())
@@ -225,7 +236,7 @@ pub(crate) fn retry_job(
         "UPDATE sys_jobs
          SET status = 'queued', error = ?1, updated_at = CURRENT_TIMESTAMP,
              worker_id = NULL, progress = 0, result = NULL, started_at = NULL,
-             finished_at = NULL
+             finished_at = NULL, lease_expires_at = NULL
          WHERE id = ?2",
         params![error, job_id],
     )?;
@@ -242,4 +253,70 @@ pub(crate) fn increment_retries(
         params![job_id],
     )?;
     Ok(())
+}
+
+pub(crate) fn cancel_job(
+    pool: &Pool<SqliteConnectionManager>,
+    job_id: &str,
+) -> anyhow::Result<usize> {
+    let conn = pool.get()?;
+    let rows = conn.execute(
+        "UPDATE sys_jobs
+         SET status = 'canceled', updated_at = CURRENT_TIMESTAMP,
+             finished_at = CURRENT_TIMESTAMP, lease_expires_at = NULL
+         WHERE id = ?1 AND status IN ('queued', 'running')",
+        params![job_id],
+    )?;
+    Ok(rows)
+}
+
+pub(crate) fn fail_timed_out_jobs(
+    pool: &Pool<SqliteConnectionManager>,
+    timeout_secs: u64,
+) -> anyhow::Result<usize> {
+    let conn = pool.get()?;
+    let rows = conn.execute(
+        "UPDATE sys_jobs
+         SET status = 'failed', error = 'timeout', updated_at = CURRENT_TIMESTAMP,
+             finished_at = CURRENT_TIMESTAMP, lease_expires_at = NULL
+         WHERE status = 'running'
+           AND started_at IS NOT NULL
+           AND (strftime('%s','now') - strftime('%s', started_at)) > ?1",
+        params![timeout_secs as i64],
+    )?;
+    Ok(rows)
+}
+
+pub(crate) fn renew_lease(
+    pool: &Pool<SqliteConnectionManager>,
+    job_id: &str,
+    worker_id: &str,
+    lease_secs: u64,
+) -> anyhow::Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "UPDATE sys_jobs
+         SET lease_expires_at = strftime('%s','now') + ?1,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = ?2 AND status = 'running' AND worker_id = ?3",
+        params![lease_secs as i64, job_id, worker_id],
+    )?;
+    Ok(())
+}
+
+pub(crate) fn requeue_expired_leases(
+    pool: &Pool<SqliteConnectionManager>,
+) -> anyhow::Result<usize> {
+    let conn = pool.get()?;
+    let rows = conn.execute(
+        "UPDATE sys_jobs
+         SET status = 'queued', worker_id = NULL, updated_at = CURRENT_TIMESTAMP,
+             started_at = NULL, finished_at = NULL, progress = 0, result = NULL,
+             error = 'lease_expired', lease_expires_at = NULL
+         WHERE status = 'running'
+           AND lease_expires_at IS NOT NULL
+           AND lease_expires_at < strftime('%s','now')",
+        [],
+    )?;
+    Ok(rows)
 }

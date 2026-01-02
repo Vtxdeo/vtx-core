@@ -115,6 +115,7 @@ async fn main() -> anyhow::Result<()> {
         event_bus,
     });
 
+    jobs::recover_startup(state.registry.clone(), settings.job_queue.clone()).await;
     jobs::spawn_workers(state.registry.clone(), settings.job_queue.clone());
 
     // 路由定义
@@ -134,6 +135,7 @@ async fn main() -> anyhow::Result<()> {
                 .route("/jobs", post(admin::submit_job_handler))
                 .route("/jobs", get(admin::list_jobs_handler))
                 .route("/jobs/:id", get(admin::get_job_handler))
+                .route("/jobs/:id/cancel", post(admin::cancel_job_handler))
                 .route("/ws/events", get(ws::ws_handler))
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),

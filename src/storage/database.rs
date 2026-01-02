@@ -97,6 +97,12 @@ pub(crate) fn initialize_pool(
             CREATE INDEX IF NOT EXISTS idx_jobs_status_created
             ON sys_jobs(status, created_at);",
         ),
+        M::up(
+            "ALTER TABLE sys_jobs ADD COLUMN lease_expires_at INTEGER;
+             CREATE INDEX IF NOT EXISTS idx_jobs_lease_expires_at
+             ON sys_jobs(lease_expires_at);",
+        ),
+        M::up("ALTER TABLE sys_jobs ADD COLUMN payload_version INTEGER DEFAULT 1;"),
     ]);
 
     if let Err(e) = migrations.to_latest(&mut conn) {

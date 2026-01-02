@@ -67,6 +67,14 @@ pub struct JobQueueSettings {
     pub poll_interval_ms: u64,
     /// æœ€å¤§å¹¶å‘ worker æ•°
     pub max_concurrent: u32,
+    /// ä»»åŠ¡æœ€é•¿è¿è¡Œæ—¶é—´ï¼ˆsï¼‰
+    pub timeout_secs: u64,
+    /// è¶…æ—¶æ‰«æé—´éš”ï¼ˆmsï¼‰
+    pub sweep_interval_ms: u64,
+    /// worker å æœ‰ä»»åŠ¡çš„ç§Ÿçº¦æ—¶é—´ï¼ˆsï¼‰
+    pub lease_secs: u64,
+    /// ç§Ÿçº¦å›žæ”¶æ‰«æé—´éš”ï¼ˆmsï¼‰
+    pub reclaim_interval_ms: u64,
 }
 
 impl Settings {
@@ -96,6 +104,10 @@ impl Settings {
             // Job Queue é»˜è®¤é…ç½®
             .set_default("job_queue.poll_interval_ms", 1500)?
             .set_default("job_queue.max_concurrent", 1)?
+            .set_default("job_queue.timeout_secs", 3600)?
+            .set_default("job_queue.sweep_interval_ms", 30000)?
+            .set_default("job_queue.lease_secs", 120)?
+            .set_default("job_queue.reclaim_interval_ms", 15000)?
             // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
             // 环境变量支持（如 VTX_SERVER__PORT=8080）

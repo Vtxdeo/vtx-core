@@ -1,6 +1,8 @@
+use crate::runtime::host_impl::api::auth_types::UserContext;
+use crate::runtime::job_registry;
 use crate::web::state::AppState;
 use axum::{
-    extract::{Json, Path, Query, State},
+    extract::{Extension, Json, Path, Query, State},
     http::StatusCode,
     response::IntoResponse,
     Json as AxumJson,
@@ -30,6 +32,7 @@ pub struct JobSubmitRequest {
     pub job_type: String,
     pub payload: serde_json::Value,
     pub max_retries: Option<i64>,
+    pub payload_version: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -213,13 +216,37 @@ pub async fn remove_scan_root_handler(
 
 pub async fn submit_job_handler(
     State(state): State<Arc<AppState>>,
+    Extension(user): Extension<UserContext>,
     Json(payload): Json<JobSubmitRequest>,
 ) -> AxumJson<serde_json::Value> {
+    if let Err(message) = validate_job_submission(&user, &payload) {
+        return AxumJson(serde_json::json!({
+            "status": "error",
+            "message": message
+        }));
+    }
     let max_retries = payload.max_retries.unwrap_or(0);
-    let payload_json = payload.payload.to_string();
+    let payload_version = payload.payload_version.unwrap_or(1);
+    let (normalized_payload, normalized_version) =
+        match job_registry::normalize_payload(&payload.job_type, &payload.payload, payload_version)
+        {
+            Ok(result) => result,
+            Err(message) => {
+                return AxumJson(serde_json::json!({
+                    "status": "error",
+                    "message": message
+                }))
+            }
+        };
+    let payload_json = normalized_payload.to_string();
     match state
         .registry
-        .enqueue_job(&payload.job_type, &payload_json, max_retries)
+        .enqueue_job(
+            &payload.job_type,
+            &payload_json,
+            normalized_version,
+            max_retries,
+        )
     {
         Ok(job_id) => AxumJson(serde_json::json!({
             "status": "success",
@@ -252,6 +279,16 @@ pub async fn get_job_handler(
     }
 }
 
+fn validate_job_submission(user: &UserContext, payload: &JobSubmitRequest) -> Result<(), String> {
+    let payload_version = payload.payload_version.unwrap_or(1);
+    job_registry::validate_job_submission(
+        &payload.job_type,
+        &payload.payload,
+        Some(&user.groups),
+        payload_version,
+    )
+}
+
 pub async fn list_jobs_handler(
     State(state): State<Arc<AppState>>,
     Query(params): Query<JobListParams>,
@@ -262,6 +299,26 @@ pub async fn list_jobs_handler(
             "status": "success",
             "count": jobs.len(),
             "data": jobs
+        })),
+        Err(e) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": e.to_string()
+        })),
+    }
+}
+
+pub async fn cancel_job_handler(
+    State(state): State<Arc<AppState>>,
+    Path(job_id): Path<String>,
+) -> AxumJson<serde_json::Value> {
+    match state.registry.cancel_job(&job_id) {
+        Ok(0) => AxumJson(serde_json::json!({
+            "status": "error",
+            "message": "Job not found or not cancelable"
+        })),
+        Ok(_) => AxumJson(serde_json::json!({
+            "status": "success",
+            "job_id": job_id
         })),
         Err(e) => AxumJson(serde_json::json!({
             "status": "error",

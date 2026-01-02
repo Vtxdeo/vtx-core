@@ -124,13 +124,8 @@ impl VideoRegistry {
     // Job queue (persistent)
     // ===============================
 
-    pub fn enqueue_job(
-        &self,
-        job_type: &str,
-        payload: &str,
-        max_retries: i64,
-    ) -> anyhow::Result<String> {
-        jobs::enqueue_job(&self.pool, job_type, payload, max_retries)
+    pub fn enqueue_job(&self, job_type: &str, payload: &str, payload_version: i64, max_retries: i64) -> anyhow::Result<String> {
+        jobs::enqueue_job(&self.pool, job_type, payload, payload_version, max_retries)
     }
 
     pub fn get_job(&self, job_id: &str) -> anyhow::Result<Option<jobs::JobRecord>> {
@@ -141,8 +136,8 @@ impl VideoRegistry {
         jobs::list_recent_jobs(&self.pool, limit)
     }
 
-    pub fn claim_next_job(&self, worker_id: &str) -> anyhow::Result<Option<jobs::JobRecord>> {
-        jobs::claim_next_job(&self.pool, worker_id)
+    pub fn claim_next_job(&self, worker_id: &str, lease_secs: u64) -> anyhow::Result<Option<jobs::JobRecord>> {
+        jobs::claim_next_job(&self.pool, worker_id, lease_secs)
     }
 
     pub fn update_job_progress(&self, job_id: &str, progress: i64) -> anyhow::Result<()> {
@@ -165,7 +160,21 @@ impl VideoRegistry {
         jobs::increment_retries(&self.pool, job_id)
     }
 
+    pub fn cancel_job(&self, job_id: &str) -> anyhow::Result<usize> {
+        jobs::cancel_job(&self.pool, job_id)
+    }
 
+    pub fn fail_timed_out_jobs(&self, timeout_secs: u64) -> anyhow::Result<usize> {
+        jobs::fail_timed_out_jobs(&self.pool, timeout_secs)
+    }
+
+    pub fn renew_job_lease(&self, job_id: &str, worker_id: &str, lease_secs: u64) -> anyhow::Result<()> {
+        jobs::renew_lease(&self.pool, job_id, worker_id, lease_secs)
+    }
+
+    pub fn requeue_expired_job_leases(&self) -> anyhow::Result<usize> {
+        jobs::requeue_expired_leases(&self.pool)
+    }
     // ===============================
     // 高级控制（不推荐常规使用�?
     // ===============================
@@ -176,3 +185,10 @@ impl VideoRegistry {
         Ok(self.pool.get()?)
     }
 }
+
+
+
+
+
+
+
