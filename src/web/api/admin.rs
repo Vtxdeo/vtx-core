@@ -1,10 +1,9 @@
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::job_registry;
 use crate::web::state::AppState;
+use crate::web::utils::errors;
 use axum::{
     extract::{Extension, Json, Path, Query, State},
-    http::StatusCode,
-    response::IntoResponse,
     Json as AxumJson,
 };
 use serde::Deserialize;
@@ -51,20 +50,14 @@ pub async fn scan_handler(
         Ok(roots) => roots,
         Err(e) => {
             tracing::error!("[Admin] Scan roots load failed: {}", e);
-            return AxumJson(serde_json::json!({
-                "status": "error",
-                "message": "Failed to load scan roots"
-            }));
+            return AxumJson(errors::admin_internal_error_json(&e.to_string()));
         }
     };
 
     let scan_root = match validate_scan_path(&payload.path, &allowed_roots) {
         Ok(path) => path,
         Err(message) => {
-            return AxumJson(serde_json::json!({
-                "status": "error",
-                "message": message
-            }))
+            return AxumJson(errors::admin_bad_request_json(&message))
         }
     };
 
@@ -72,17 +65,10 @@ pub async fn scan_handler(
         .registry
         .scan_directory(&scan_root.to_string_lossy())
     {
-        Ok(new_videos) => AxumJson(serde_json::json!({
-            "status": "success",
-            "scanned_count": new_videos.len(),
-            "data": new_videos
-        })),
+        Ok(new_videos) => AxumJson(success_with_count(new_videos, "scanned_count")),
         Err(e) => {
             tracing::error!("[Admin] Scan failed: {}", e);
-            AxumJson(serde_json::json!({
-                "status": "error",
-                "message": e.to_string()
-            }))
+            AxumJson(errors::admin_internal_error_json(&e.to_string()))
         }
     }
 }
@@ -118,16 +104,12 @@ fn validate_scan_path(
 }
 
 /// 列表查询接口
-pub async fn list_handler(State(state): State<Arc<AppState>>) -> impl IntoResponse {
+pub async fn list_handler(State(state): State<Arc<AppState>>) -> AxumJson<serde_json::Value> {
     match state.registry.list_all() {
-        Ok(videos) => AxumJson(videos).into_response(),
+        Ok(videos) => AxumJson(success_with_count(videos, "count")),
         Err(e) => {
             tracing::error!("[Admin] List videos failed: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Database error: {}", e),
-            )
-                .into_response()
+            AxumJson(errors::admin_internal_error_json(&e.to_string()))
         }
     }
 }
@@ -137,11 +119,7 @@ pub async fn list_plugins_handler(
     State(state): State<Arc<AppState>>,
 ) -> AxumJson<serde_json::Value> {
     let plugins = state.plugin_manager.list_plugins();
-    AxumJson(serde_json::json!({
-        "status": "success",
-        "count": plugins.len(),
-        "data": plugins
-    }))
+    AxumJson(success_with_count(plugins, "count"))
 }
 
 /// 卸载插件接口
@@ -153,14 +131,10 @@ pub async fn uninstall_handler(
         .plugin_manager
         .uninstall(&params.plugin_id, params.keep_data)
     {
-        Ok(_) => AxumJson(serde_json::json!({
-            "status": "success",
+        Ok(_) => AxumJson(success_json(serde_json::json!({
             "message": format!("Plugin '{}' uninstalled", params.plugin_id)
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        }))),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
 }
 
@@ -168,15 +142,8 @@ pub async fn list_scan_roots_handler(
     State(state): State<Arc<AppState>>,
 ) -> AxumJson<serde_json::Value> {
     match state.registry.list_scan_roots() {
-        Ok(roots) => AxumJson(serde_json::json!({
-            "status": "success",
-            "count": roots.len(),
-            "data": roots
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        Ok(roots) => AxumJson(success_with_count(roots, "count")),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
 }
 
@@ -186,14 +153,8 @@ pub async fn add_scan_root_handler(
 ) -> AxumJson<serde_json::Value> {
     let path = PathBuf::from(payload.path);
     match state.registry.add_scan_root(&path) {
-        Ok(resolved) => AxumJson(serde_json::json!({
-            "status": "success",
-            "path": resolved
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        Ok(resolved) => AxumJson(success_json(serde_json::json!({ "path": resolved }))),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
 }
 
@@ -203,14 +164,8 @@ pub async fn remove_scan_root_handler(
 ) -> AxumJson<serde_json::Value> {
     let path = PathBuf::from(payload.path);
     match state.registry.remove_scan_root(&path) {
-        Ok(resolved) => AxumJson(serde_json::json!({
-            "status": "success",
-            "path": resolved
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        Ok(resolved) => AxumJson(success_json(serde_json::json!({ "path": resolved }))),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
 }
 
@@ -220,10 +175,7 @@ pub async fn submit_job_handler(
     Json(payload): Json<JobSubmitRequest>,
 ) -> AxumJson<serde_json::Value> {
     if let Err(message) = validate_job_submission(&user, &payload) {
-        return AxumJson(serde_json::json!({
-            "status": "error",
-            "message": message
-        }));
+        return AxumJson(errors::admin_bad_request_json(&message));
     }
     let max_retries = payload.max_retries.unwrap_or(0);
     let payload_version = payload.payload_version.unwrap_or(1);
@@ -232,10 +184,7 @@ pub async fn submit_job_handler(
         {
             Ok(result) => result,
             Err(message) => {
-                return AxumJson(serde_json::json!({
-                    "status": "error",
-                    "message": message
-                }))
+                return AxumJson(errors::admin_bad_request_json(&message))
             }
         };
     let payload_json = normalized_payload.to_string();
@@ -248,14 +197,8 @@ pub async fn submit_job_handler(
             max_retries,
         )
     {
-        Ok(job_id) => AxumJson(serde_json::json!({
-            "status": "success",
-            "job_id": job_id
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        Ok(job_id) => AxumJson(success_json(serde_json::json!({ "job_id": job_id }))),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
 }
 
@@ -264,18 +207,9 @@ pub async fn get_job_handler(
     Path(job_id): Path<String>,
 ) -> AxumJson<serde_json::Value> {
     match state.registry.get_job(&job_id) {
-        Ok(Some(job)) => AxumJson(serde_json::json!({
-            "status": "success",
-            "data": job
-        })),
-        Ok(None) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": "Job not found"
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        Ok(Some(job)) => AxumJson(success_json(job)),
+        Ok(None) => AxumJson(errors::admin_not_found_json("Job not found")),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
 }
 
@@ -295,15 +229,8 @@ pub async fn list_jobs_handler(
 ) -> AxumJson<serde_json::Value> {
     let limit = params.limit.unwrap_or(50).max(1);
     match state.registry.list_recent_jobs(limit) {
-        Ok(jobs) => AxumJson(serde_json::json!({
-            "status": "success",
-            "count": jobs.len(),
-            "data": jobs
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        Ok(jobs) => AxumJson(success_with_count(jobs, "count")),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
 }
 
@@ -312,17 +239,27 @@ pub async fn cancel_job_handler(
     Path(job_id): Path<String>,
 ) -> AxumJson<serde_json::Value> {
     match state.registry.cancel_job(&job_id) {
-        Ok(0) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": "Job not found or not cancelable"
-        })),
-        Ok(_) => AxumJson(serde_json::json!({
-            "status": "success",
-            "job_id": job_id
-        })),
-        Err(e) => AxumJson(serde_json::json!({
-            "status": "error",
-            "message": e.to_string()
-        })),
+        Ok(0) => AxumJson(errors::admin_not_found_json("Job not found or not cancelable")),
+        Ok(_) => AxumJson(success_json(serde_json::json!({ "job_id": job_id }))),
+        Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
+}
+
+fn success_json<T: serde::Serialize>(data: T) -> serde_json::Value {
+    serde_json::json!({
+        "status": "success",
+        "data": data
+    })
+}
+
+fn success_with_count<T: serde::Serialize>(data: T, key: &str) -> serde_json::Value {
+    let mut value = success_json(data);
+    if let serde_json::Value::Object(ref mut map) = value {
+        if let Some(data_value) = map.get("data") {
+            if let Some(array) = data_value.as_array() {
+                map.insert(key.to_string(), serde_json::json!(array.len()));
+            }
+        }
+    }
+    value
 }

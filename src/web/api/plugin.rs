@@ -1,9 +1,10 @@
 use crate::runtime::executor::PluginExecutor;
-use crate::web::{state::AppState, utils::streaming::StreamProtocolLayer};
+use crate::web::{state::AppState, utils::errors, utils::streaming::StreamProtocolLayer};
 use axum::{
     extract::State,
     http::{HeaderMap, Method, StatusCode, Uri},
     response::{IntoResponse, Response},
+    Json,
 };
 use std::sync::Arc;
 
@@ -28,7 +29,7 @@ pub async fn gateway_handler(
         None => {
             return (
                 StatusCode::NOT_FOUND,
-                format!("No plugin configured to handle route: {}", path),
+                Json(errors::plugin_not_found_json("No plugin configured for route")),
             )
                 .into_response();
         }
@@ -53,10 +54,18 @@ pub async fn gateway_handler(
         }
         Err(msg) => {
             if msg == "NO_CONTENT" {
-                (StatusCode::NOT_FOUND, "Resource not found").into_response()
+                (
+                    StatusCode::NOT_FOUND,
+                    Json(errors::plugin_not_found_json("Resource not found")),
+                )
+                    .into_response()
             } else {
                 tracing::error!("[Gateway] Execution failed: {}", msg);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Plugin execution failed").into_response()
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(errors::plugin_internal_error_json(&msg)),
+                )
+                    .into_response()
             }
         }
     }
