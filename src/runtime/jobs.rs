@@ -1,11 +1,17 @@
 use crate::config::JobQueueSettings;
 use crate::runtime::job_registry;
-use crate::storage::{VideoRegistry, videos::{ScanOutcome, ScanAbort}};
+use crate::storage::{
+    videos::{ScanAbort, ScanOutcome},
+    VideoRegistry,
+};
 use serde::Deserialize;
+use std::sync::{
+    atomic::{AtomicBool, AtomicUsize, Ordering},
+    Arc,
+};
 use std::time::Duration;
-use std::sync::{Arc, atomic::{AtomicBool, AtomicUsize, Ordering}};
+use tokio::sync::{Mutex, OwnedSemaphorePermit, Semaphore};
 use tokio::time::{sleep, Instant};
-use tokio::sync::{Mutex, Semaphore, OwnedSemaphorePermit};
 use tracing::{error, info, warn};
 
 #[derive(Deserialize)]
@@ -166,10 +172,9 @@ pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
                 }
                 if last_reclaim.elapsed() >= reclaim_interval {
                     let registry = registry.clone();
-                    let reclaim_result = tokio::task::spawn_blocking(move || {
-                        registry.requeue_expired_job_leases()
-                    })
-                    .await;
+                    let reclaim_result =
+                        tokio::task::spawn_blocking(move || registry.requeue_expired_job_leases())
+                            .await;
                     match reclaim_result {
                         Ok(Ok(count)) => {
                             if count > 0 {
@@ -201,7 +206,8 @@ pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
                         let heartbeat_running = running.clone();
                         let heartbeat_registry = registry.clone();
                         let heartbeat_worker = worker_id.clone();
-                        let heartbeat_interval = Duration::from_secs(std::cmp::max(1, lease_secs / 2));
+                        let heartbeat_interval =
+                            Duration::from_secs(std::cmp::max(1, lease_secs / 2));
                         let heartbeat_job_id = job_id.clone();
 
                         tokio::spawn(async move {
@@ -312,10 +318,8 @@ pub async fn recover_startup(registry: VideoRegistry, settings: JobQueueSettings
         Err(join_err) => error!("[Jobs] Startup lease reclaim join error: {}", join_err),
     }
 
-    let timeout_sweep = tokio::task::spawn_blocking(move || {
-        registry.fail_timed_out_jobs(timeout_secs)
-    })
-    .await;
+    let timeout_sweep =
+        tokio::task::spawn_blocking(move || registry.fail_timed_out_jobs(timeout_secs)).await;
     match timeout_sweep {
         Ok(Ok(count)) => {
             if count > 0 {
@@ -340,12 +344,12 @@ fn handle_job(
     let (normalized_payload, _) =
         job_registry::normalize_payload(job_type, &payload_value, payload_version)?;
     match job_type {
-        "noop" => {
-            registry
-                .complete_job(job_id, r#"{"status":"ok"}"#)
-                .map_err(|e| e.to_string())
+        "noop" => registry
+            .complete_job(job_id, r#"{"status":"ok"}"#)
+            .map_err(|e| e.to_string()),
+        "scan-directory" => {
+            handle_scan_directory(registry, job_id, &normalized_payload, timeout_secs)
         }
-        "scan-directory" => handle_scan_directory(registry, job_id, &normalized_payload, timeout_secs),
         _ => Err("unsupported job_type".into()),
     }
 }
@@ -356,8 +360,8 @@ fn handle_scan_directory(
     payload: &serde_json::Value,
     timeout_secs: u64,
 ) -> Result<(), String> {
-    let payload: ScanDirectoryPayload = serde_json::from_value(payload.clone())
-        .map_err(|e| format!("Invalid payload: {}", e))?;
+    let payload: ScanDirectoryPayload =
+        serde_json::from_value(payload.clone()).map_err(|e| format!("Invalid payload: {}", e))?;
     let allowed_roots = registry
         .list_scan_roots()
         .map_err(|e| format!("Load scan roots failed: {}", e))?;
@@ -428,7 +432,10 @@ fn handle_scan_directory(
             registry
                 .complete_job(job_id, &result.to_string())
                 .map_err(|e| e.to_string())?;
-            info!("[Jobs] scan-directory completed: {} new videos", new_videos.len());
+            info!(
+                "[Jobs] scan-directory completed: {} new videos",
+                new_videos.len()
+            );
             Ok(())
         }
         ScanOutcome::Aborted(ScanAbort::Canceled) => {
@@ -449,9 +456,11 @@ fn handle_scan_directory(
     }
 }
 
-fn validate_scan_path(requested: &str, allowed_roots: &[std::path::PathBuf]) -> Result<std::path::PathBuf, String> {
-    let resolved = std::fs::canonicalize(requested)
-        .map_err(|_| "Invalid scan path".to_string())?;
+fn validate_scan_path(
+    requested: &str,
+    allowed_roots: &[std::path::PathBuf],
+) -> Result<std::path::PathBuf, String> {
+    let resolved = std::fs::canonicalize(requested).map_err(|_| "Invalid scan path".to_string())?;
 
     if !resolved.is_dir() {
         return Err("Scan path must be a directory".into());

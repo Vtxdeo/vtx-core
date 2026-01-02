@@ -14,7 +14,9 @@ use tracing::info;
 use wasmtime::component::Linker;
 
 use crate::config::Settings;
-use crate::runtime::{bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, jobs, manager::PluginManager};
+use crate::runtime::{
+    bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, jobs, manager::PluginManager,
+};
 use crate::storage::VideoRegistry;
 use crate::web::{
     api::{admin, plugin, ws},

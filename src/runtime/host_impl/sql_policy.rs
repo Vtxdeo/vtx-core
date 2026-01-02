@@ -16,8 +16,8 @@ pub fn enforce_sql_policy(
     }
 
     let dialect = SQLiteDialect {};
-    let parsed = Parser::parse_sql(&dialect, statement)
-        .map_err(|_| "Permission Denied".to_string())?;
+    let parsed =
+        Parser::parse_sql(&dialect, statement).map_err(|_| "Permission Denied".to_string())?;
     if parsed.len() != 1 {
         return Err("Permission Denied".into());
     }
@@ -74,10 +74,7 @@ fn is_allowed_statement(stmt: &Statement) -> bool {
     )
 }
 
-fn collect_tables_from_statement(
-    stmt: &Statement,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
+fn collect_tables_from_statement(stmt: &Statement, out: &mut Vec<String>) -> Result<(), String> {
     match stmt {
         Statement::Query(query) => collect_tables_from_query(query, out),
         Statement::Insert {
@@ -123,10 +120,7 @@ fn collect_tables_from_statement(
     }
 }
 
-fn collect_tables_from_query(
-    query: &Query,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
+fn collect_tables_from_query(query: &Query, out: &mut Vec<String>) -> Result<(), String> {
     if let Some(with) = &query.with {
         for cte in &with.cte_tables {
             collect_tables_from_query(&cte.query, out)?;
@@ -135,10 +129,7 @@ fn collect_tables_from_query(
     collect_tables_from_setexpr(&query.body, out)
 }
 
-fn collect_tables_from_setexpr(
-    expr: &SetExpr,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
+fn collect_tables_from_setexpr(expr: &SetExpr, out: &mut Vec<String>) -> Result<(), String> {
     match expr {
         SetExpr::Select(select) => {
             for table in &select.from {
@@ -177,9 +168,9 @@ fn collect_tables_from_table_factor(
             Ok(())
         }
         TableFactor::Derived { subquery, .. } => collect_tables_from_query(subquery, out),
-        TableFactor::NestedJoin { table_with_joins, .. } => {
-            collect_tables_from_table_with_joins(table_with_joins, out)
-        }
+        TableFactor::NestedJoin {
+            table_with_joins, ..
+        } => collect_tables_from_table_with_joins(table_with_joins, out),
         _ => Err("Permission Denied".into()),
     }
 }

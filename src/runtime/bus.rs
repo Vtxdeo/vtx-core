@@ -35,17 +35,11 @@ impl EventBus {
         drop(queues);
 
         let mut subs = self.subscriptions.write().await;
-        let allowed: std::collections::HashSet<String> = allowed_topics
-            .iter()
-            .map(|t| t.to_string())
-            .collect();
+        let allowed: std::collections::HashSet<String> =
+            allowed_topics.iter().map(|t| t.to_string()).collect();
         for topic in topics {
             if !allowed.contains(topic) {
-                tracing::warn!(
-                    "[EventBus] Subscription denied: {} -> {}",
-                    plugin_id,
-                    topic
-                );
+                tracing::warn!("[EventBus] Subscription denied: {} -> {}", plugin_id, topic);
                 continue;
             }
             let entry = subs.entry(topic.clone()).or_default();

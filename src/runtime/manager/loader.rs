@@ -8,9 +8,9 @@ use crate::storage::VideoRegistry;
 use anyhow::Context;
 use configparser::ini::Ini;
 use serde_json;
-use toml;
 use std::path::Path;
 use std::sync::Arc;
+use toml;
 use tracing::{debug, error, info};
 use wasmtime::{
     component::{Component, Linker},
@@ -88,12 +88,9 @@ pub async fn load_and_migrate(
     let migrations = plugin.call_get_migrations(&mut store).await?;
     let mut rewritten_migrations = Vec::with_capacity(migrations.len());
     for sql in migrations {
-        let rewritten = migration_policy::validate_and_rewrite_migration(
-            &plugin_id,
-            &declared_set,
-            &sql,
-        )
-        .map_err(|e| anyhow::anyhow!("Migration rejected: {}", e))?;
+        let rewritten =
+            migration_policy::validate_and_rewrite_migration(&plugin_id, &declared_set, &sql)
+                .map_err(|e| anyhow::anyhow!("Migration rejected: {}", e))?;
         rewritten_migrations.push(rewritten);
     }
     let current_ver = registry.get_plugin_version(&plugin_id);

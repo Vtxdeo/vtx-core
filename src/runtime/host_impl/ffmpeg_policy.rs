@@ -61,8 +61,7 @@ pub fn validate_ffmpeg_args(args: &[String]) -> Result<(), String> {
 fn is_flag_option(option: &str) -> bool {
     matches!(
         option,
-        "-y"
-            | "-n"
+        "-y" | "-n"
             | "-an"
             | "-vn"
             | "-sn"
@@ -77,8 +76,7 @@ fn is_flag_option(option: &str) -> bool {
 fn is_value_option(option: &str) -> bool {
     matches!(
         option,
-        "-f"
-            | "-c"
+        "-f" | "-c"
             | "-c:v"
             | "-c:a"
             | "-c:s"

@@ -40,7 +40,6 @@ pub struct PluginSettings {
     pub auth_provider: Option<String>,
 }
 
-
 /// VtxFfmpeg 中间层专用配置
 ///
 /// 职责：定义媒体处理工具链的路径与运行时约束

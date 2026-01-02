@@ -56,15 +56,10 @@ pub async fn scan_handler(
 
     let scan_root = match validate_scan_path(&payload.path, &allowed_roots) {
         Ok(path) => path,
-        Err(message) => {
-            return AxumJson(errors::admin_bad_request_json(&message))
-        }
+        Err(message) => return AxumJson(errors::admin_bad_request_json(&message)),
     };
 
-    match state
-        .registry
-        .scan_directory(&scan_root.to_string_lossy())
-    {
+    match state.registry.scan_directory(&scan_root.to_string_lossy()) {
         Ok(new_videos) => AxumJson(success_with_count(new_videos, "scanned_count")),
         Err(e) => {
             tracing::error!("[Admin] Scan failed: {}", e);
@@ -73,12 +68,8 @@ pub async fn scan_handler(
     }
 }
 
-fn validate_scan_path(
-    requested: &str,
-    allowed_roots: &[PathBuf],
-) -> Result<PathBuf, String> {
-    let resolved = std::fs::canonicalize(requested)
-        .map_err(|_| "Invalid scan path".to_string())?;
+fn validate_scan_path(requested: &str, allowed_roots: &[PathBuf]) -> Result<PathBuf, String> {
+    let resolved = std::fs::canonicalize(requested).map_err(|_| "Invalid scan path".to_string())?;
 
     if !resolved.is_dir() {
         return Err("Scan path must be a directory".into());
@@ -183,20 +174,15 @@ pub async fn submit_job_handler(
         match job_registry::normalize_payload(&payload.job_type, &payload.payload, payload_version)
         {
             Ok(result) => result,
-            Err(message) => {
-                return AxumJson(errors::admin_bad_request_json(&message))
-            }
+            Err(message) => return AxumJson(errors::admin_bad_request_json(&message)),
         };
     let payload_json = normalized_payload.to_string();
-    match state
-        .registry
-        .enqueue_job(
-            &payload.job_type,
-            &payload_json,
-            normalized_version,
-            max_retries,
-        )
-    {
+    match state.registry.enqueue_job(
+        &payload.job_type,
+        &payload_json,
+        normalized_version,
+        max_retries,
+    ) {
         Ok(job_id) => AxumJson(success_json(serde_json::json!({ "job_id": job_id }))),
         Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
@@ -239,7 +225,9 @@ pub async fn cancel_job_handler(
     Path(job_id): Path<String>,
 ) -> AxumJson<serde_json::Value> {
     match state.registry.cancel_job(&job_id) {
-        Ok(0) => AxumJson(errors::admin_not_found_json("Job not found or not cancelable")),
+        Ok(0) => AxumJson(errors::admin_not_found_json(
+            "Job not found or not cancelable",
+        )),
         Ok(_) => AxumJson(success_json(serde_json::json!({ "job_id": job_id }))),
         Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }

@@ -33,9 +33,10 @@ impl BufferIo for BufferType {
                 c.seek(SeekFrom::Start(offset))?;
                 std::io::Read::read(c, dest)
             }
-            BufferType::Pipe(_) => {
-                Err(std::io::Error::new(std::io::ErrorKind::Other, "Pipe does not support synchronous random access"))
-            }
+            BufferType::Pipe(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                "Pipe does not support synchronous random access",
+            )),
         }
     }
 }

@@ -1,6 +1,6 @@
 use crate::config::Settings;
-use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::bus::EventBus;
+use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::manager::PluginManager;
 use crate::storage::VideoRegistry;
 use std::sync::Arc;

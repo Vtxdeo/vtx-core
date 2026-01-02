@@ -83,8 +83,7 @@ pub(crate) fn get_job_status(
     job_id: &str,
 ) -> anyhow::Result<Option<String>> {
     let conn = pool.get()?;
-    let mut stmt =
-        conn.prepare_cached("SELECT status FROM sys_jobs WHERE id = ?1")?;
+    let mut stmt = conn.prepare_cached("SELECT status FROM sys_jobs WHERE id = ?1")?;
     let status = stmt.query_row(params![job_id], |row| row.get(0));
     match status {
         Ok(status) => Ok(Some(status)),
@@ -384,9 +383,8 @@ pub(crate) fn count_jobs_by_type_and_status(
     status: &str,
 ) -> anyhow::Result<usize> {
     let conn = pool.get()?;
-    let mut stmt = conn.prepare_cached(
-        "SELECT COUNT(*) FROM sys_jobs WHERE job_type = ?1 AND status = ?2",
-    )?;
+    let mut stmt =
+        conn.prepare_cached("SELECT COUNT(*) FROM sys_jobs WHERE job_type = ?1 AND status = ?2")?;
     let count: i64 = stmt.query_row(params![job_type, status], |row| row.get(0))?;
     Ok(count as usize)
 }

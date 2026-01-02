@@ -9,14 +9,14 @@ use r2d2_sqlite::SqliteConnectionManager;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 
-/// 视频元数据结�?
+/// 视频元数据结�?
 #[derive(Debug, Clone, Serialize)]
 pub struct VideoMeta {
-    /// 视频唯一标识�?
+    /// 视频唯一标识�?
     pub id: String,
-    /// 文件名（不含路径�?
+    /// 文件名（不含路径�?
     pub filename: String,
-    /// 原始完整路径（用于内部处理，不序列化�?
+    /// 原始完整路径（用于内部处理，不序列化�?
     #[serde(skip_serializing)]
     #[allow(dead_code)]
     pub full_path: PathBuf,
@@ -27,7 +27,7 @@ pub struct VideoMeta {
 /// 注册中心：统一管理数据库访问，供插件与视频模块使用
 #[derive(Clone)]
 pub struct VideoRegistry {
-    /// SQLite 连接池（共享给子模块�?
+    /// SQLite 连接池（共享给子模块�?
     pub(crate) pool: Pool<SqliteConnectionManager>,
 }
 
@@ -35,7 +35,7 @@ impl VideoRegistry {
     /// 创建注册中心并初始化数据库连接池
     ///
     /// # Parameters
-    /// - `db_path`: 数据库文件路�?
+    /// - `db_path`: 数据库文件路�?
     /// - `max_connections`: 最大连接数
     pub fn new(db_path: &str, max_connections: u32) -> anyhow::Result<Self> {
         let pool = database::initialize_pool(db_path, max_connections)?;
@@ -67,26 +67,26 @@ impl VideoRegistry {
         videos::list_all(&self.pool)
     }
 
-    /// 获取指定视频的实际文件路�?
+    /// 获取指定视频的实际文件路�?
     pub fn get_path(&self, id: &str) -> Option<PathBuf> {
         videos::get_path(&self.pool, id)
     }
 
     // ===============================
-    // 插件元数据管理相关（代理调用�?
+    // 插件元数据管理相关（代理调用�?
     // ===============================
 
-    /// 查询插件当前版本�?
+    /// 查询插件当前版本�?
     pub fn get_plugin_version(&self, plugin_name: &str) -> usize {
         plugins::get_plugin_version(&self.pool, plugin_name)
     }
 
-    /// 更新插件版本�?
+    /// 更新插件版本�?
     pub fn set_plugin_version(&self, plugin_name: &str, new_version: usize) {
         plugins::set_plugin_version(&self.pool, plugin_name, new_version)
     }
 
-    /// 向数据库注册插件所需的资源项（如表名、模型等�?
+    /// 向数据库注册插件所需的资源项（如表名、模型等�?
     pub fn register_resource(&self, plugin_name: &str, res_type: &str, res_name: &str) {
         plugins::register_resource(&self.pool, plugin_name, res_type, res_name)
     }
@@ -100,7 +100,7 @@ impl VideoRegistry {
         plugins::list_resources(&self.pool, plugin_name, res_type)
     }
 
-    /// 验证插件是否已安装，并尝试锁定安装路�?
+    /// 验证插件是否已安装，并尝试锁定安装路�?
     pub fn verify_installation(
         &self,
         plugin_id: &str,
@@ -109,7 +109,7 @@ impl VideoRegistry {
         plugins::verify_installation(&self.pool, plugin_id, current_path)
     }
 
-    /// 释放插件的安装锁�?
+    /// 释放插件的安装锁�?
     pub fn release_installation(&self, plugin_id: &str) -> anyhow::Result<()> {
         plugins::release_installation(&self.pool, plugin_id)
     }
@@ -135,7 +135,13 @@ impl VideoRegistry {
     // Job queue (persistent)
     // ===============================
 
-    pub fn enqueue_job(&self, job_type: &str, payload: &str, payload_version: i64, max_retries: i64) -> anyhow::Result<String> {
+    pub fn enqueue_job(
+        &self,
+        job_type: &str,
+        payload: &str,
+        payload_version: i64,
+        max_retries: i64,
+    ) -> anyhow::Result<String> {
         jobs::enqueue_job(&self.pool, job_type, payload, payload_version, max_retries)
     }
 
@@ -163,7 +169,11 @@ impl VideoRegistry {
         jobs::list_recent_jobs(&self.pool, limit)
     }
 
-    pub fn claim_next_job(&self, worker_id: &str, lease_secs: u64) -> anyhow::Result<Option<jobs::JobRecord>> {
+    pub fn claim_next_job(
+        &self,
+        worker_id: &str,
+        lease_secs: u64,
+    ) -> anyhow::Result<Option<jobs::JobRecord>> {
         jobs::claim_next_job(&self.pool, worker_id, lease_secs)
     }
 
@@ -195,7 +205,12 @@ impl VideoRegistry {
         jobs::fail_timed_out_jobs(&self.pool, timeout_secs)
     }
 
-    pub fn renew_job_lease(&self, job_id: &str, worker_id: &str, lease_secs: u64) -> anyhow::Result<()> {
+    pub fn renew_job_lease(
+        &self,
+        job_id: &str,
+        worker_id: &str,
+        lease_secs: u64,
+    ) -> anyhow::Result<()> {
         jobs::renew_lease(&self.pool, job_id, worker_id, lease_secs)
     }
 
@@ -211,19 +226,12 @@ impl VideoRegistry {
         jobs::count_jobs_by_type_and_status(&self.pool, job_type, status)
     }
     // ===============================
-    // 高级控制（不推荐常规使用�?
+    // 高级控制（不推荐常规使用�?
     // ===============================
 
-    /// 获取底层数据库连接（用于自定义事务或原始访问�?
+    /// 获取底层数据库连接（用于自定义事务或原始访问�?
     #[allow(dead_code)]
     pub fn get_conn(&self) -> anyhow::Result<r2d2::PooledConnection<SqliteConnectionManager>> {
         Ok(self.pool.get()?)
     }
 }
-
-
-
-
-
-
-

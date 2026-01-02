@@ -1,18 +1,14 @@
+use super::api;
 use crate::common::events::{EventContext, VtxEvent};
 use crate::runtime::context::StreamContext;
-use super::api;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 #[async_trait::async_trait]
 impl api::event_bus::Host for StreamContext {
-    async fn publish_event(
-        &mut self,
-        topic: String,
-        payload: String,
-    ) -> Result<(), String> {
-        let payload_json = serde_json::from_str(&payload)
-            .map_err(|_| "Invalid event payload".to_string())?;
+    async fn publish_event(&mut self, topic: String, payload: String) -> Result<(), String> {
+        let payload_json =
+            serde_json::from_str(&payload).map_err(|_| "Invalid event payload".to_string())?;
 
         let source = match &self.plugin_id {
             Some(id) => format!("plugin.{}", id),

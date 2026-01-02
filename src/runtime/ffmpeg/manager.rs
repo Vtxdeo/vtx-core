@@ -31,11 +31,7 @@ impl VtxFfmpegManager {
     /// - `binary_root`: 存放 vtx-ffmpeg 二进制文件的目录路径
     /// - `execution_timeout_secs`: 子进程最大执行时长
     /// - `use_system_binary`: 是否允许调用系统 PATH 中的 ffmpeg
-    pub fn new(
-        binary_root: PathBuf,
-        execution_timeout_secs: u64,
-        use_system_binary: bool,
-    ) -> Self {
+    pub fn new(binary_root: PathBuf, execution_timeout_secs: u64, use_system_binary: bool) -> Self {
         let mut manager = Self {
             profiles: HashMap::new(),
             binary_root,

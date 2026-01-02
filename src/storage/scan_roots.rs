@@ -10,10 +10,7 @@ pub(crate) fn list_scan_roots(
     let conn = pool.get()?;
     let mut stmt = conn.prepare("SELECT path FROM sys_scan_roots ORDER BY path")?;
     let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
-    Ok(rows
-        .filter_map(Result::ok)
-        .map(PathBuf::from)
-        .collect())
+    Ok(rows.filter_map(Result::ok).map(PathBuf::from).collect())
 }
 
 pub(crate) fn add_scan_root(

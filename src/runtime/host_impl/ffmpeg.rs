@@ -1,9 +1,9 @@
-use wasmtime::component::Resource;
+use super::api;
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
 use crate::runtime::host_impl::ffmpeg_policy::validate_ffmpeg_args;
-use super::api;
 use std::process::Stdio;
+use wasmtime::component::Resource;
 
 #[async_trait::async_trait]
 impl api::ffmpeg::Host for StreamContext {
@@ -20,13 +20,12 @@ impl api::ffmpeg::Host for StreamContext {
         }
 
         // 获取最佳匹配的二进制文件
-        let binary = self
-            .vtx_ffmpeg
-            .get_binary(&params.profile)
-            .ok_or_else(|| format!(
+        let binary = self.vtx_ffmpeg.get_binary(&params.profile).ok_or_else(|| {
+            format!(
                 "Profile '{}' (or compatible alternative) not installed on host",
                 params.profile
-            ))?;
+            )
+        })?;
 
         // [Fix] 统一返回类型为 (String, bool)
         let (input_arg, use_stdin_pipe) = if params.input_id == "pipe:0" {

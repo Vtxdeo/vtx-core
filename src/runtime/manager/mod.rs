@@ -12,11 +12,11 @@ use wasmtime::Engine;
 
 use crate::runtime::bus::EventBus;
 use crate::runtime::context::{SecurityPolicy, StreamContext};
+use crate::runtime::executor::PluginExecutor;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::Manifest;
 use crate::runtime::host_impl::Plugin;
-use crate::runtime::executor::PluginExecutor;
 use crate::storage::VideoRegistry;
 
 pub struct PluginRuntime {
@@ -261,11 +261,7 @@ impl PluginManager {
                     )
                     .await
                     {
-                        tracing::error!(
-                            "[EventBus] Dispatch failed for '{}': {}",
-                            runtime.id,
-                            e
-                        );
+                        tracing::error!("[EventBus] Dispatch failed for '{}': {}", runtime.id, e);
                     }
                 }
             });
@@ -397,7 +393,10 @@ impl PluginManager {
                 { self.plugins.read().unwrap().values().cloned().collect() };
 
             for plugin_runtime in plugins {
-                match self.invoke_authenticate(&plugin_runtime, &wit_headers).await {
+                match self
+                    .invoke_authenticate(&plugin_runtime, &wit_headers)
+                    .await
+                {
                     Ok(user) => return Ok(user),
                     Err(code) => {
                         // 401/403 表示该插件无法处理或拒绝，继续尝试下一个
@@ -441,9 +440,9 @@ impl PluginManager {
             .instantiate_async(&mut store)
             .await
             .map_err(|e| {
-            error!("[Auth] Instantiation failed: {}", e);
-            500u16
-        })?;
+                error!("[Auth] Instantiation failed: {}", e);
+                500u16
+            })?;
 
         let plugin = Plugin::new(&mut store, &instance).map_err(|_| 500u16)?;
 

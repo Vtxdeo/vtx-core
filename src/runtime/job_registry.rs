@@ -78,7 +78,12 @@ pub fn normalize_payload(
         return Err("unsupported payload version".into());
     }
     let normalized = if payload_version < definition.schema_version {
-        migrate_payload(job_type, payload, payload_version, definition.schema_version)?
+        migrate_payload(
+            job_type,
+            payload,
+            payload_version,
+            definition.schema_version,
+        )?
     } else {
         payload.clone()
     };

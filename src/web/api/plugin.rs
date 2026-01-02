@@ -29,7 +29,9 @@ pub async fn gateway_handler(
         None => {
             return (
                 StatusCode::NOT_FOUND,
-                Json(errors::plugin_not_found_json("No plugin configured for route")),
+                Json(errors::plugin_not_found_json(
+                    "No plugin configured for route",
+                )),
             )
                 .into_response();
         }
