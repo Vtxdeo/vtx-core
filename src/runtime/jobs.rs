@@ -79,7 +79,7 @@ pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
         let registry = registry.clone();
         tokio::spawn(async move {
             let min = std::cmp::max(1, adaptive.min_concurrent) as usize;
-            let max = std::cmp::max(min, adaptive.max_concurrent) as usize;
+            let max = std::cmp::max(min, adaptive.max_concurrent as usize);
             let mut target = min;
             limiter.set_target(target).await;
             let interval = Duration::from_millis(std::cmp::max(200, adaptive.check_interval_ms));
@@ -241,11 +241,12 @@ pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
                         } else {
                             None
                         };
+                        let job_id_for_handle = job_id.clone();
                         let handle_result = tokio::task::spawn_blocking(move || {
                             let _permit = scan_permit;
                             handle_job(
                                 &registry_for_job,
-                                &job_id,
+                                &job_id_for_handle,
                                 &job_type,
                                 &payload,
                                 payload_version,

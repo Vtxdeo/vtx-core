@@ -69,12 +69,18 @@ where
         .map(|entry| {
             should_continue()?;
             let path = entry.path();
-            let ext = path.extension()?.to_string_lossy().to_lowercase();
+            let ext = match path.extension() {
+                Some(ext) => ext.to_string_lossy().to_lowercase(),
+                None => return Ok(None),
+            };
             if !["mp4", "mkv", "mov", "avi", "webm"].contains(&ext.as_str()) {
                 return Ok(None);
             }
 
-            let real_path = std::fs::canonicalize(path).ok()?;
+            let real_path = match std::fs::canonicalize(path) {
+                Ok(real_path) => real_path,
+                Err(_) => return Ok(None),
+            };
             let full_path_str = real_path.to_string_lossy().to_string();
 
             // ?????????????????????
@@ -87,9 +93,14 @@ where
                 return Ok(None);
             }
 
+            let filename = match path.file_name() {
+                Some(name) => name.to_string_lossy().to_string(),
+                None => return Ok(None),
+            };
+
             Ok(Some(VideoMeta {
                 id: Uuid::new_v4().to_string(),
-                filename: path.file_name()?.to_string_lossy().to_string(),
+                filename,
                 full_path: real_path,
                 created_at: "Just Now".to_string(),
             }))

@@ -1,10 +1,16 @@
 use serde_json::Value;
 
+#[allow(dead_code)]
 pub const CODE_INTERNAL: &str = "VTX-CORE-500";
+#[allow(dead_code)]
 pub const CODE_BAD_REQUEST: &str = "VTX-CORE-400";
+#[allow(dead_code)]
 pub const CODE_NOT_FOUND: &str = "VTX-CORE-404";
+#[allow(dead_code)]
 pub const CODE_FORBIDDEN: &str = "VTX-CORE-403";
+#[allow(dead_code)]
 pub const CODE_UNAUTHORIZED: &str = "VTX-CORE-401";
+#[allow(dead_code)]
 pub const CODE_CONFLICT: &str = "VTX-CORE-409";
 
 pub const CODE_ADMIN_INTERNAL: &str = "VTX-ADM-500";
@@ -14,18 +20,22 @@ pub const CODE_ADMIN_NOT_FOUND: &str = "VTX-ADM-404";
 pub const CODE_PLUGIN_INTERNAL: &str = "VTX-PLG-500";
 pub const CODE_PLUGIN_NOT_FOUND: &str = "VTX-PLG-404";
 
+#[allow(dead_code)]
 pub fn internal_error_json(details: &str) -> Value {
     error_json(CODE_INTERNAL, "Internal error", Some(details))
 }
 
+#[allow(dead_code)]
 pub fn internal_error_message(details: &str) -> String {
     public_message("Internal error", details)
 }
 
+#[allow(dead_code)]
 pub fn bad_request_json(details: &str) -> Value {
     error_json(CODE_BAD_REQUEST, "Invalid request", Some(details))
 }
 
+#[allow(dead_code)]
 pub fn not_found_json(details: &str) -> Value {
     error_json(CODE_NOT_FOUND, "Not found", Some(details))
 }
@@ -63,6 +73,7 @@ pub fn error_json(code: &str, safe_message: &str, details: Option<&str>) -> Valu
     })
 }
 
+#[allow(dead_code)]
 pub fn public_message(safe_message: &str, details: &str) -> String {
     if cfg!(debug_assertions) {
         format!("{}: {}", safe_message, details)
