@@ -11,8 +11,8 @@ use wasmtime::component::{Component, InstancePre, Linker};
 use wasmtime::Engine;
 
 use crate::runtime::bus::EventBus;
-use crate::runtime::context::{SecurityPolicy, StreamContext};
-use crate::runtime::executor::PluginExecutor;
+use crate::runtime::context::{SecurityPolicy, StreamContext, StreamContextConfig};
+use crate::runtime::executor::{EventDispatchContext, PluginExecutor};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::Manifest;
@@ -75,18 +75,31 @@ pub struct PluginManager {
     event_bus: Arc<EventBus>,
 }
 
+pub struct PluginManagerConfig {
+    pub engine: Engine,
+    pub plugin_dir: PathBuf,
+    pub registry: VideoRegistry,
+    pub linker: Linker<StreamContext>,
+    pub auth_provider: Option<String>,
+    pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub max_buffer_read_bytes: u64,
+    pub max_memory_bytes: usize,
+    pub event_bus: Arc<EventBus>,
+}
+
 impl PluginManager {
-    pub async fn new(
-        engine: Engine,
-        mut plugin_dir: PathBuf,
-        registry: VideoRegistry,
-        linker: Linker<StreamContext>,
-        auth_provider: Option<String>,
-        vtx_ffmpeg: Arc<VtxFfmpegManager>,
-        max_buffer_read_bytes: u64,
-        max_memory_bytes: usize,
-        event_bus: Arc<EventBus>,
-    ) -> anyhow::Result<Self> {
+    pub async fn new(config: PluginManagerConfig) -> anyhow::Result<Self> {
+        let PluginManagerConfig {
+            engine,
+            mut plugin_dir,
+            registry,
+            linker,
+            auth_provider,
+            vtx_ffmpeg,
+            max_buffer_read_bytes,
+            max_memory_bytes,
+            event_bus,
+        } = config;
         if plugin_dir.is_file() {
             warn!(
                 "[PluginManager] Configured path '{:?}' is a file, but a directory is expected.",
@@ -164,7 +177,7 @@ impl PluginManager {
 
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |e| e == "vtx") {
+            if path.extension().is_some_and(|e| e == "vtx") {
                 match self.load_one(&path).await {
                     Ok(_) => loaded_count += 1,
                     Err(e) => error!("[PluginManager] Failed to load {}: {}", path.display(), e),
@@ -263,12 +276,14 @@ impl PluginManager {
                 };
                 while let Some(event) = rx.recv().await {
                     if let Err(e) = PluginExecutor::dispatch_event_with(
-                        engine.clone(),
-                        registry.clone(),
-                        vtx_ffmpeg.clone(),
-                        bus.clone(),
-                        max_memory,
-                        max_buffer,
+                        EventDispatchContext {
+                            engine: engine.clone(),
+                            registry: registry.clone(),
+                            vtx_ffmpeg: vtx_ffmpeg.clone(),
+                            event_bus: bus.clone(),
+                            max_memory_bytes: max_memory,
+                            max_buffer_read_bytes: max_buffer,
+                        },
                         runtime.clone(),
                         event,
                     )
@@ -386,9 +401,12 @@ impl PluginManager {
 
         // 性能优化：O(1) 精确查找
         if let Some(provider_id) = &self.auth_provider {
-            let plugins = self.plugins.read().unwrap();
-            if let Some(runtime) = plugins.get(provider_id) {
-                match self.invoke_authenticate(runtime, &wit_headers).await {
+            let runtime = {
+                let plugins = self.plugins.read().unwrap();
+                plugins.get(provider_id).cloned()
+            };
+            if let Some(runtime) = runtime {
+                match self.invoke_authenticate(&runtime, &wit_headers).await {
                     Ok(user) => return Ok(user),
                     Err(code) => return Err(code),
                 }
@@ -435,17 +453,17 @@ impl PluginManager {
             .memory_size(10 * 1024 * 1024)
             .build();
 
-        let ctx = StreamContext::new_secure(
-            self.registry.clone(),
-            self.vtx_ffmpeg.clone(),
-            limits,
-            SecurityPolicy::Restricted,
-            Some(runtime.id.clone()),
-            self.max_buffer_read_bytes,
-            None,
-            self.event_bus.clone(),
-            runtime.policy.permissions.iter().cloned().collect(),
-        );
+        let ctx = StreamContext::new_secure(StreamContextConfig {
+            registry: self.registry.clone(),
+            vtx_ffmpeg: self.vtx_ffmpeg.clone(),
+            limiter: limits,
+            policy: SecurityPolicy::Restricted,
+            plugin_id: Some(runtime.id.clone()),
+            max_buffer_read_bytes: self.max_buffer_read_bytes,
+            current_user: None,
+            event_bus: self.event_bus.clone(),
+            permissions: runtime.policy.permissions.iter().cloned().collect(),
+        });
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);
 
@@ -467,6 +485,5 @@ impl PluginManager {
                 error!("[Auth] Call failed: {}", e);
                 500u16
             })?
-            .map_err(|code| code)
     }
 }

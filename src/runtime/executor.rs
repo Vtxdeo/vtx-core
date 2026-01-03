@@ -1,6 +1,6 @@
 use crate::common::buffer::RealBuffer;
 use crate::runtime::bus::EventBus;
-use crate::runtime::context::{CurrentUser, SecurityPolicy, StreamContext};
+use crate::runtime::context::{CurrentUser, SecurityPolicy, StreamContext, StreamContextConfig};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::{api, Plugin};
 use crate::runtime::manager::PluginRuntime;
@@ -13,6 +13,15 @@ use wasmtime::Store;
 ///
 /// 职责：封装单次请求的 Wasm 环境构建、执行与资源回收过程。
 pub struct PluginExecutor;
+
+pub struct EventDispatchContext {
+    pub engine: wasmtime::Engine,
+    pub registry: VideoRegistry,
+    pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub event_bus: Arc<EventBus>,
+    pub max_memory_bytes: usize,
+    pub max_buffer_read_bytes: u64,
+}
 
 impl PluginExecutor {
     /// 执行指定的插件实例
@@ -56,17 +65,17 @@ impl PluginExecutor {
             .cloned()
             .collect::<std::collections::HashSet<_>>();
 
-        let ctx = StreamContext::new_secure(
+        let ctx = StreamContext::new_secure(StreamContextConfig {
             registry,
             vtx_ffmpeg,
-            limits,
-            SecurityPolicy::Plugin,
-            Some(plugin_id),
+            limiter: limits,
+            policy: SecurityPolicy::Plugin,
+            plugin_id: Some(plugin_id),
             max_buffer_read_bytes,
             current_user,
-            state.event_bus.clone(),
+            event_bus: state.event_bus.clone(),
             permissions,
-        );
+        });
 
         let mut store = Store::new(&engine, ctx);
         store.limiter(|s| &mut s.limiter);
@@ -109,12 +118,14 @@ impl PluginExecutor {
         event: crate::common::events::VtxEvent,
     ) -> Result<(), String> {
         Self::dispatch_event_with(
-            state.engine.clone(),
-            state.registry.clone(),
-            state.vtx_ffmpeg.clone(),
-            state.event_bus.clone(),
-            state.config.plugins.max_memory_mb as usize * 1024 * 1024,
-            state.config.plugins.max_buffer_read_mb * 1024 * 1024,
+            EventDispatchContext {
+                engine: state.engine.clone(),
+                registry: state.registry.clone(),
+                vtx_ffmpeg: state.vtx_ffmpeg.clone(),
+                event_bus: state.event_bus.clone(),
+                max_memory_bytes: state.config.plugins.max_memory_mb as usize * 1024 * 1024,
+                max_buffer_read_bytes: state.config.plugins.max_buffer_read_mb * 1024 * 1024,
+            },
             runtime,
             event,
         )
@@ -122,15 +133,18 @@ impl PluginExecutor {
     }
 
     pub async fn dispatch_event_with(
-        engine: wasmtime::Engine,
-        registry: VideoRegistry,
-        vtx_ffmpeg: Arc<VtxFfmpegManager>,
-        event_bus: Arc<EventBus>,
-        max_memory_bytes: usize,
-        max_buffer_read_bytes: u64,
+        context: EventDispatchContext,
         runtime: Arc<PluginRuntime>,
         event: crate::common::events::VtxEvent,
     ) -> Result<(), String> {
+        let EventDispatchContext {
+            engine,
+            registry,
+            vtx_ffmpeg,
+            event_bus,
+            max_memory_bytes,
+            max_buffer_read_bytes,
+        } = context;
         let plugin_id = runtime.id.clone();
         let permissions = runtime
             .policy
@@ -150,17 +164,17 @@ impl PluginExecutor {
             groups: Vec::new(),
         });
 
-        let ctx = StreamContext::new_secure(
+        let ctx = StreamContext::new_secure(StreamContextConfig {
             registry,
             vtx_ffmpeg,
-            limits,
-            SecurityPolicy::Plugin,
-            Some(plugin_id),
+            limiter: limits,
+            policy: SecurityPolicy::Plugin,
+            plugin_id: Some(plugin_id),
             max_buffer_read_bytes,
             current_user,
             event_bus,
             permissions,
-        );
+        });
 
         let mut store = Store::new(&engine, ctx);
         store.limiter(|s| &mut s.limiter);

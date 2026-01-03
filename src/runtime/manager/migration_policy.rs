@@ -387,9 +387,9 @@ fn tokenize(statement: &str) -> Result<Vec<Token>, String> {
 }
 
 fn next_word(tokens: &[Token], start: usize) -> Result<(usize, String), String> {
-    for i in start..tokens.len() {
-        if tokens[i].kind == TokenKind::Word {
-            let word = tokens[i].value.to_ascii_lowercase();
+    for (i, token) in tokens.iter().enumerate().skip(start) {
+        if token.kind == TokenKind::Word {
+            let word = token.value.to_ascii_lowercase();
             if word == "if" || word == "not" || word == "exists" || word == "temporary" {
                 continue;
             }
@@ -400,8 +400,8 @@ fn next_word(tokens: &[Token], start: usize) -> Result<(usize, String), String> 
 }
 
 fn next_identifier(tokens: &[Token], start: usize) -> Result<usize, String> {
-    for i in start..tokens.len() {
-        if tokens[i].kind == TokenKind::Word {
+    for (i, token) in tokens.iter().enumerate().skip(start) {
+        if token.kind == TokenKind::Word {
             return Ok(i);
         }
     }

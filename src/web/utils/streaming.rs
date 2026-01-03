@@ -181,7 +181,7 @@ impl StreamProtocolLayer {
         }
 
         // 定位至 Range 起始位置
-        if let Err(_) = file.seek(SeekFrom::Start(start)) {
+        if file.seek(SeekFrom::Start(start)).is_err() {
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
 

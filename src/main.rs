@@ -15,7 +15,8 @@ use wasmtime::component::Linker;
 
 use crate::config::Settings;
 use crate::runtime::{
-    bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, jobs, manager::PluginManager,
+    bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, jobs,
+    manager::{PluginManager, PluginManagerConfig},
 };
 use crate::storage::VideoRegistry;
 use crate::web::{
@@ -94,17 +95,17 @@ async fn main() -> anyhow::Result<()> {
     // 初始化插件管理器 (传入 vtx_ffmpeg_manager)
     let event_bus = Arc::new(EventBus::new(256));
 
-    let plugin_manager = PluginManager::new(
-        engine.clone(),
-        settings.plugins.location.clone(),
-        registry.clone(),
+    let plugin_manager = PluginManager::new(PluginManagerConfig {
+        engine: engine.clone(),
+        plugin_dir: settings.plugins.location.clone(),
+        registry: registry.clone(),
         linker,
-        settings.plugins.auth_provider.clone(),
-        vtx_ffmpeg_manager.clone(),
-        settings.plugins.max_buffer_read_mb * 1024 * 1024,
-        max_memory_bytes as usize,
-        event_bus.clone(),
-    )
+        auth_provider: settings.plugins.auth_provider.clone(),
+        vtx_ffmpeg: vtx_ffmpeg_manager.clone(),
+        max_buffer_read_bytes: settings.plugins.max_buffer_read_mb * 1024 * 1024,
+        max_memory_bytes: max_memory_bytes as usize,
+        event_bus: event_bus.clone(),
+    })
     .await?;
 
     // 构造全局状态

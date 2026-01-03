@@ -70,7 +70,7 @@ fn handle_fs_event(
     event: Event,
 ) {
     for path in event.paths {
-        if path.extension().map_or(false, |e| e == "vtx") {
+        if path.extension().is_some_and(|e| e == "vtx") {
             if event.kind.is_remove() {
                 if pending_events.remove(&path).is_some() {
                     info!(

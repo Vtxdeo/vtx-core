@@ -36,6 +36,18 @@ pub struct StreamContext {
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
 }
 
+pub struct StreamContextConfig {
+    pub registry: VideoRegistry,
+    pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub limiter: wasmtime::StoreLimits,
+    pub policy: SecurityPolicy,
+    pub plugin_id: Option<String>,
+    pub max_buffer_read_bytes: u64,
+    pub current_user: Option<CurrentUser>,
+    pub event_bus: Arc<EventBus>,
+    pub permissions: std::collections::HashSet<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct CurrentUser {
     pub user_id: String,
@@ -45,17 +57,18 @@ pub struct CurrentUser {
 
 impl StreamContext {
     /// 创建一个零信任的插件沙箱上下文
-    pub fn new_secure(
-        registry: VideoRegistry,
-        vtx_ffmpeg: Arc<VtxFfmpegManager>,
-        limiter: wasmtime::StoreLimits,
-        policy: SecurityPolicy,
-        plugin_id: Option<String>,
-        max_buffer_read_bytes: u64,
-        current_user: Option<CurrentUser>,
-        event_bus: Arc<EventBus>,
-        permissions: std::collections::HashSet<String>,
-    ) -> Self {
+    pub fn new_secure(config: StreamContextConfig) -> Self {
+        let StreamContextConfig {
+            registry,
+            vtx_ffmpeg,
+            limiter,
+            policy,
+            plugin_id,
+            max_buffer_read_bytes,
+            current_user,
+            event_bus,
+            permissions,
+        } = config;
         let wasi = WasiCtxBuilder::new()
             .inherit_stdio()
             .env("VTX_ENV", "production")

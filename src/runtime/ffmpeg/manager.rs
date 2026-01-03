@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use tracing::{debug, error, info, warn};
 
 use super::binary::{verify_binary, FfmpegBinary};
@@ -56,9 +56,8 @@ impl VtxFfmpegManager {
                         let path = entry.path();
                         if is_executable(&path) {
                             if let Some(filename) = path.file_name().and_then(|n| n.to_str()) {
-                                if filename.starts_with("vtx-ffmpeg-") {
+                                if let Some(profile_raw) = filename.strip_prefix("vtx-ffmpeg-") {
                                     // 解析 Profile 名称
-                                    let profile_raw = &filename["vtx-ffmpeg-".len()..];
                                     let profile = profile_raw
                                         .split('.')
                                         .next()
@@ -187,6 +186,6 @@ impl VtxFfmpegManager {
 }
 
 /// 检查文件是否像是可执行文件
-fn is_executable(path: &PathBuf) -> bool {
+fn is_executable(path: &Path) -> bool {
     path.is_file()
 }

@@ -122,17 +122,13 @@ fn split_option_value<'a>(lower: &str, arg: &'a str) -> Option<(String, &'a str)
         return None;
     }
 
-    let mut parts = lower.splitn(2, '=');
-    let key = parts.next().unwrap_or("");
-    let _value_lower = parts.next().unwrap_or("");
+    let (key, _value_lower) = lower.split_once('=')?;
 
     if !is_value_option(key) {
         return None;
     }
 
-    let mut raw_parts = arg.splitn(2, '=');
-    let _raw_key = raw_parts.next()?;
-    let raw_value = raw_parts.next()?;
+    let (_, raw_value) = arg.split_once('=')?;
     Some((key.to_string(), raw_value))
 }
 

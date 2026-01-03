@@ -1,5 +1,5 @@
 use crate::runtime::{
-    context::{SecurityPolicy, StreamContext},
+    context::{SecurityPolicy, StreamContext, StreamContextConfig},
     ffmpeg::VtxFfmpegManager,
     host_impl::Plugin,
     manager::migration_policy,
@@ -45,17 +45,17 @@ pub async fn load_and_migrate(
     let (component, vtx_meta) = load_component_from_vtx(engine, vtx_path)?;
 
     // Root 权限允许迁移
-    let ctx = StreamContext::new_secure(
-        registry.clone(),
+    let ctx = StreamContext::new_secure(StreamContextConfig {
+        registry: registry.clone(),
         vtx_ffmpeg,
-        wasmtime::StoreLimitsBuilder::new().build(),
-        SecurityPolicy::Root,
-        None,
-        0,
-        None,
+        limiter: wasmtime::StoreLimitsBuilder::new().build(),
+        policy: SecurityPolicy::Root,
+        plugin_id: None,
+        max_buffer_read_bytes: 0,
+        current_user: None,
         event_bus,
-        std::collections::HashSet::new(),
-    );
+        permissions: std::collections::HashSet::new(),
+    });
     let mut store = wasmtime::Store::new(engine, ctx);
 
     let instance = linker.instantiate_async(&mut store, &component).await?;

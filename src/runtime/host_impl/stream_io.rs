@@ -33,8 +33,7 @@ impl BufferIo for BufferType {
                 c.seek(SeekFrom::Start(offset))?;
                 std::io::Read::read(c, dest)
             }
-            BufferType::Pipe(_) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
+            BufferType::Pipe(_) => Err(std::io::Error::other(
                 "Pipe does not support synchronous random access",
             )),
         }
@@ -175,7 +174,7 @@ impl api::stream_io::HostBuffer for StreamContext {
                 return vec![];
             }
             let mut chunk = vec![0u8; limit as usize];
-            let read_len = file.read(&mut chunk).unwrap_or_else(|_| 0);
+            let read_len = file.read(&mut chunk).unwrap_or(0);
             chunk.truncate(read_len);
             chunk
         })

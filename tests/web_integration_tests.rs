@@ -18,7 +18,8 @@ use vtx_core::{
     common::events::{EventContext, VtxEvent},
     config::Settings,
     runtime::{
-        bus::EventBus, context::StreamContext, ffmpeg::VtxFfmpegManager, manager::PluginManager,
+        bus::EventBus, context::StreamContext, ffmpeg::VtxFfmpegManager,
+        manager::{PluginManager, PluginManagerConfig},
     },
     storage::VideoRegistry,
     web::{
@@ -46,17 +47,17 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     ));
     let event_bus = Arc::new(EventBus::new(8));
 
-    let plugin_manager = PluginManager::new(
-        engine.clone(),
-        temp_dir.path().join("plugins"),
-        registry.clone(),
+    let plugin_manager = PluginManager::new(PluginManagerConfig {
+        engine: engine.clone(),
+        plugin_dir: temp_dir.path().join("plugins"),
+        registry: registry.clone(),
         linker,
-        None,
-        vtx_ffmpeg.clone(),
-        4 * 1024 * 1024,
-        32 * 1024 * 1024,
-        event_bus.clone(),
-    )
+        auth_provider: None,
+        vtx_ffmpeg: vtx_ffmpeg.clone(),
+        max_buffer_read_bytes: 4 * 1024 * 1024,
+        max_memory_bytes: 32 * 1024 * 1024,
+        event_bus: event_bus.clone(),
+    })
     .await
     .expect("plugin_manager");
 
