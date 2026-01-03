@@ -1,1 +1,4 @@
 /target
+vtx-core/vtxdeo.db
+vtx-core/vtxdeo.db-shm
+vtx-core/vtxdeo.db-wal
