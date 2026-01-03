@@ -18,7 +18,9 @@ use vtx_core::{
     common::events::{EventContext, VtxEvent},
     config::Settings,
     runtime::{
-        bus::EventBus, context::StreamContext, ffmpeg::VtxFfmpegManager,
+        bus::EventBus,
+        context::StreamContext,
+        ffmpeg::VtxFfmpegManager,
         manager::{PluginManager, PluginManagerConfig},
     },
     storage::VideoRegistry,

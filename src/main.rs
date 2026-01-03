@@ -15,7 +15,10 @@ use wasmtime::component::Linker;
 
 use crate::config::Settings;
 use crate::runtime::{
-    bus::EventBus, ffmpeg::VtxFfmpegManager, host_impl::api, jobs,
+    bus::EventBus,
+    ffmpeg::VtxFfmpegManager,
+    host_impl::api,
+    jobs,
     manager::{PluginManager, PluginManagerConfig},
 };
 use crate::storage::VideoRegistry;
