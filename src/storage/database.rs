@@ -103,6 +103,18 @@ pub(crate) fn initialize_pool(
              ON sys_jobs(lease_expires_at);",
         ),
         M::up("ALTER TABLE sys_jobs ADD COLUMN payload_version INTEGER DEFAULT 1;"),
+        M::up(
+            "CREATE TABLE IF NOT EXISTS sys_plugin_metadata (
+                plugin_id TEXT PRIMARY KEY,
+                author TEXT,
+                sdk_version TEXT,
+                package TEXT,
+                language TEXT,
+                tool_name TEXT,
+                tool_version TEXT,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+            );",
+        ),
     ]);
 
     if let Err(e) = migrations.to_latest(&mut conn) {

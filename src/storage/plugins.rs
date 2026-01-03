@@ -4,6 +4,8 @@ use rusqlite::{params, OptionalExtension};
 use std::path::Path;
 use tracing::{error, info, warn};
 
+use crate::runtime::manager::VtxPackageMetadata;
+
 /// 获取插件版本
 pub(crate) fn get_plugin_version(pool: &Pool<SqliteConnectionManager>, plugin_name: &str) -> usize {
     let Ok(conn) = pool.get() else { return 0 };
@@ -150,6 +152,42 @@ pub(crate) fn nuke_plugin(
         "DELETE FROM sys_plugin_versions WHERE plugin_name = ?1",
         [plugin_name],
     )?;
+    // Best-effort cleanup for v2 package metadata (keyed by plugin_id)
+    let _ = conn.execute(
+        "DELETE FROM sys_plugin_metadata WHERE plugin_id = ?1",
+        [plugin_name],
+    );
 
     Ok(1)
+}
+
+pub(crate) fn set_plugin_metadata(
+    pool: &Pool<SqliteConnectionManager>,
+    plugin_id: &str,
+    meta: &VtxPackageMetadata,
+) -> anyhow::Result<()> {
+    let conn = pool.get()?;
+    conn.execute(
+        "INSERT INTO sys_plugin_metadata (
+            plugin_id, author, sdk_version, package, language, tool_name, tool_version, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, CURRENT_TIMESTAMP)
+        ON CONFLICT(plugin_id) DO UPDATE SET
+            author = excluded.author,
+            sdk_version = excluded.sdk_version,
+            package = excluded.package,
+            language = excluded.language,
+            tool_name = excluded.tool_name,
+            tool_version = excluded.tool_version,
+            updated_at = CURRENT_TIMESTAMP",
+        params![
+            plugin_id,
+            meta.author,
+            meta.sdk_version,
+            meta.package,
+            meta.language,
+            meta.tool_name,
+            meta.tool_version
+        ],
+    )?;
+    Ok(())
 }

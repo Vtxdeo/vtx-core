@@ -114,6 +114,14 @@ impl VideoRegistry {
         plugins::release_installation(&self.pool, plugin_id)
     }
 
+    pub fn set_plugin_metadata(
+        &self,
+        plugin_id: &str,
+        meta: &crate::runtime::manager::VtxPackageMetadata,
+    ) -> anyhow::Result<()> {
+        plugins::set_plugin_metadata(&self.pool, plugin_id, meta)
+    }
+
     /// 从系统中彻底移除插件记录
     pub fn nuke_plugin(&self, plugin_name: &str) -> anyhow::Result<usize> {
         plugins::nuke_plugin(&self.pool, plugin_name)

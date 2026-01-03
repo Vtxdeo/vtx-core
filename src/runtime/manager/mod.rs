@@ -19,10 +19,21 @@ use crate::runtime::host_impl::api::types::Manifest;
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
 
+#[derive(Debug, Clone, Serialize)]
+pub struct VtxPackageMetadata {
+    pub author: Option<String>,
+    pub sdk_version: Option<String>,
+    pub package: Option<String>,
+    pub language: Option<String>,
+    pub tool_name: Option<String>,
+    pub tool_version: Option<String>,
+}
+
 pub struct PluginRuntime {
     pub id: String,
     pub manifest: Manifest,
     pub policy: PluginPolicy,
+    pub vtx_meta: Option<VtxPackageMetadata>,
     pub instance_pre: InstancePre<StreamContext>,
     #[allow(dead_code)]
     pub component: Component,
@@ -37,6 +48,7 @@ pub struct PluginStatus {
     pub version: String,
     pub entrypoint: String,
     pub source_path: String,
+    pub vtx_meta: Option<VtxPackageMetadata>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -188,6 +200,7 @@ impl PluginManager {
             id: load_result.plugin_id.clone(),
             manifest: load_result.manifest.clone(),
             policy: load_result.policy.clone(),
+            vtx_meta: load_result.vtx_meta.clone(),
             instance_pre,
             component: load_result.component,
             source_path: path.to_path_buf(),
@@ -357,6 +370,7 @@ impl PluginManager {
                 version: p.manifest.version.clone(),
                 entrypoint: p.manifest.entrypoint.clone(),
                 source_path: p.source_path.to_string_lossy().to_string(),
+                vtx_meta: p.vtx_meta.clone(),
             })
             .collect()
     }

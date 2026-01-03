@@ -22,6 +22,7 @@ pub struct LoadResult {
     pub plugin_id: String,
     pub manifest: crate::runtime::host_impl::api::types::Manifest,
     pub policy: super::PluginPolicy,
+    pub vtx_meta: Option<super::VtxPackageMetadata>,
     pub component: Component,
 }
 
@@ -41,7 +42,7 @@ pub async fn load_and_migrate(
 ) -> anyhow::Result<LoadResult> {
     enforce_vtx_only(vtx_path)?;
 
-    let component = load_component_from_vtx(engine, vtx_path)?;
+    let (component, vtx_meta) = load_component_from_vtx(engine, vtx_path)?;
 
     // Root 权限允许迁移
     let ctx = StreamContext::new_secure(
@@ -70,6 +71,17 @@ pub async fn load_and_migrate(
             "Plugin ID '{}' is already registered with a different path. Installation aborted.",
             plugin_id
         ));
+    }
+
+    // Persist package metadata (best-effort, v2 only)
+    if let Some(meta) = vtx_meta.as_ref() {
+        if let Err(e) = registry.set_plugin_metadata(&plugin_id, meta) {
+            tracing::warn!(
+                "[plugin/meta] Failed to persist metadata for {}: {}",
+                plugin_id,
+                e
+            );
+        }
     }
 
     info!(
@@ -161,6 +173,7 @@ pub async fn load_and_migrate(
         plugin_id,
         manifest,
         policy,
+        vtx_meta,
         component,
     })
 }
@@ -259,18 +272,55 @@ fn enforce_vtx_only(path: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn load_component_from_vtx(engine: &Engine, path: &Path) -> anyhow::Result<Component> {
+fn load_component_from_vtx(
+    engine: &Engine,
+    path: &Path,
+) -> anyhow::Result<(Component, Option<super::VtxPackageMetadata>)> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("failed to read plugin package: {}", path.display()))?;
 
-    let (version, component_bytes) = vtx_format::decode(&bytes)
+    let decoded = vtx_format::decode_with_metadata(&bytes)
         .with_context(|| format!("invalid vtx package: {}", path.display()))?;
 
-    Component::new(engine, component_bytes).with_context(|| {
-        format!(
-            "failed to compile component from vtx (version {}): {}",
-            version,
-            path.display()
-        )
+    let version = decoded.version;
+    let vtx_meta = decoded.metadata.and_then(parse_vtx_metadata_json);
+    let component_bytes = decoded.component;
+
+    Component::new(engine, component_bytes)
+        .with_context(|| {
+            format!(
+                "failed to compile component from vtx (version {}): {}",
+                version,
+                path.display()
+            )
+        })
+        .map(|c| (c, vtx_meta))
+}
+
+fn parse_vtx_metadata_json(bytes: &[u8]) -> Option<super::VtxPackageMetadata> {
+    #[derive(serde::Deserialize)]
+    struct Tool {
+        name: Option<String>,
+        version: Option<String>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct Meta {
+        author: Option<String>,
+        sdk_version: Option<String>,
+        package: Option<String>,
+        language: Option<String>,
+        tool: Option<Tool>,
+    }
+
+    let text = std::str::from_utf8(bytes).ok()?;
+    let parsed: Meta = serde_json::from_str(text).ok()?;
+    Some(super::VtxPackageMetadata {
+        author: parsed.author,
+        sdk_version: parsed.sdk_version,
+        package: parsed.package,
+        language: parsed.language,
+        tool_name: parsed.tool.as_ref().and_then(|t| t.name.clone()),
+        tool_version: parsed.tool.as_ref().and_then(|t| t.version.clone()),
     })
 }
