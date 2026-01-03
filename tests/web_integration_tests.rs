@@ -9,22 +9,22 @@ use http_body_util::BodyExt;
 use serde_json::Value;
 use std::sync::Arc;
 use tempfile::tempdir;
-use tower::util::ServiceExt;
+use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
-use tokio::time::{timeout, Duration};
+use tower::util::ServiceExt;
 use uuid::Uuid;
 use vtx_core::{
     common::events::{EventContext, VtxEvent},
     config::Settings,
     runtime::{
-        bus::EventBus,
-        context::StreamContext,
-        ffmpeg::VtxFfmpegManager,
-        manager::PluginManager,
+        bus::EventBus, context::StreamContext, ffmpeg::VtxFfmpegManager, manager::PluginManager,
     },
     storage::VideoRegistry,
-    web::{api::{admin, ws}, state::AppState},
+    web::{
+        api::{admin, ws},
+        state::AppState,
+    },
 };
 use wasmtime::component::Linker;
 
@@ -89,7 +89,12 @@ async fn read_json(response: axum::response::Response) -> (StatusCode, Value) {
 async fn health_route_returns_ok() {
     let app = Router::new().route("/health", get(|| async { "OK" }));
     let response = app
-        .oneshot(Request::builder().uri("/health").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/health")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .expect("response");
 
@@ -139,7 +144,12 @@ async fn admin_scan_roots_flow() {
 
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/admin/scan-roots").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/scan-roots")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .expect("response");
     let (status, payload) = read_json(response).await;
@@ -167,7 +177,10 @@ async fn admin_scan_directory_returns_count() {
     let (state, _temp_dir) = make_state().await;
 
     let app = Router::new()
-        .nest("/admin", Router::new().route("/scan", post(admin::scan_handler)))
+        .nest(
+            "/admin",
+            Router::new().route("/scan", post(admin::scan_handler)),
+        )
         .with_state(state.clone());
 
     let scan_root = tempdir().expect("scan_root");
@@ -204,11 +217,19 @@ async fn admin_list_plugins_empty() {
     let (state, _temp_dir) = make_state().await;
 
     let app = Router::new()
-        .nest("/admin", Router::new().route("/plugins", get(admin::list_plugins_handler)))
+        .nest(
+            "/admin",
+            Router::new().route("/plugins", get(admin::list_plugins_handler)),
+        )
         .with_state(state);
 
     let response = app
-        .oneshot(Request::builder().uri("/admin/plugins").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/plugins")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .expect("response");
 
@@ -262,11 +283,19 @@ async fn admin_jobs_flow() {
 
     let (status, payload) = read_json(response).await;
     assert_eq!(status, StatusCode::OK);
-    let job_id = payload["data"]["job_id"].as_str().expect("job_id").to_string();
+    let job_id = payload["data"]["job_id"]
+        .as_str()
+        .expect("job_id")
+        .to_string();
 
     let response = app
         .clone()
-        .oneshot(Request::builder().uri("/admin/jobs?limit=10").body(Body::empty()).unwrap())
+        .oneshot(
+            Request::builder()
+                .uri("/admin/jobs?limit=10")
+                .body(Body::empty())
+                .unwrap(),
+        )
         .await
         .expect("response");
     let (status, payload) = read_json(response).await;
@@ -316,7 +345,8 @@ async fn admin_jobs_not_found_returns_error_code() {
     let app = Router::new()
         .nest(
             "/admin",
-            Router::new().route("/jobs/:id", get(admin::get_job_handler))
+            Router::new()
+                .route("/jobs/:id", get(admin::get_job_handler))
                 .layer(axum::Extension(user)),
         )
         .with_state(state);
@@ -341,7 +371,10 @@ async fn admin_scan_rejects_when_roots_missing() {
     let (state, _temp_dir) = make_state().await;
 
     let app = Router::new()
-        .nest("/admin", Router::new().route("/scan", post(admin::scan_handler)))
+        .nest(
+            "/admin",
+            Router::new().route("/scan", post(admin::scan_handler)),
+        )
         .with_state(state);
 
     let scan_root = tempdir().expect("scan_root");
@@ -447,7 +480,10 @@ async fn admin_scan_rejects_file_path() {
     let (state, _temp_dir) = make_state().await;
 
     let app = Router::new()
-        .nest("/admin", Router::new().route("/scan", post(admin::scan_handler)))
+        .nest(
+            "/admin",
+            Router::new().route("/scan", post(admin::scan_handler)),
+        )
         .with_state(state);
 
     let scan_root = tempdir().expect("scan_root");
@@ -486,7 +522,8 @@ async fn admin_jobs_rejects_missing_group() {
     let app = Router::new()
         .nest(
             "/admin",
-            Router::new().route("/jobs", post(admin::submit_job_handler))
+            Router::new()
+                .route("/jobs", post(admin::submit_job_handler))
                 .layer(axum::Extension(user)),
         )
         .with_state(state);
@@ -547,7 +584,10 @@ async fn admin_scan_rejects_path_outside_roots() {
     let (state, _temp_dir) = make_state().await;
 
     let app = Router::new()
-        .nest("/admin", Router::new().route("/scan", post(admin::scan_handler)))
+        .nest(
+            "/admin",
+            Router::new().route("/scan", post(admin::scan_handler)),
+        )
         .with_state(state.clone());
 
     let allowed_root = tempdir().expect("allowed_root");

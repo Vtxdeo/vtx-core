@@ -10,9 +10,7 @@ fn make_registry() -> VideoRegistry {
 #[test]
 fn enqueue_and_get_job() {
     let registry = make_registry();
-    let job_id = registry
-        .enqueue_job("noop", "{}", 1, 2)
-        .expect("enqueue");
+    let job_id = registry.enqueue_job("noop", "{}", 1, 2).expect("enqueue");
 
     let job = registry.get_job(&job_id).expect("get").expect("job");
     assert_eq!(job.job_type, "noop");
@@ -50,9 +48,7 @@ fn retry_and_cancel_job() {
     let registry = make_registry();
     let job_id = registry.enqueue_job("scan", "{}", 1, 1).expect("enqueue");
 
-    registry
-        .retry_job(&job_id, "transient")
-        .expect("retry");
+    registry.retry_job(&job_id, "transient").expect("retry");
     let status = registry.get_job_status(&job_id).expect("status");
     assert_eq!(status.as_deref(), Some("queued"));
 

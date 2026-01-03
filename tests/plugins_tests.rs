@@ -24,9 +24,7 @@ fn register_and_list_resources() {
     registry.register_resource("p1", "TABLE", "vtx_table");
     registry.register_resource("p1", "KV", "vtx_kv");
 
-    let mut tables = registry
-        .list_plugin_resources("p1", "TABLE")
-        .expect("list");
+    let mut tables = registry.list_plugin_resources("p1", "TABLE").expect("list");
     tables.sort();
     assert_eq!(tables, vec!["vtx_table".to_string()]);
 }

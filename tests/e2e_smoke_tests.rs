@@ -84,11 +84,7 @@ fn parse_response(response: &str) -> (u16, String) {
         .and_then(|s| s.parse::<u16>().ok())
         .unwrap_or(0);
 
-    let body = response
-        .split("\r\n\r\n")
-        .nth(1)
-        .unwrap_or("")
-        .to_string();
+    let body = response.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
 
     (status_code, body)
 }
@@ -146,8 +142,7 @@ vtx_ffmpeg.binary_root = \"{ffmpeg}\"\n",
 
 fn e2e_lock() -> std::sync::MutexGuard<'static, ()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK
-        .get_or_init(|| Mutex::new(()))
+    LOCK.get_or_init(|| Mutex::new(()))
         .lock()
         .unwrap_or_else(|e| e.into_inner())
 }
