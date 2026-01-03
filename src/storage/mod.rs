@@ -51,7 +51,7 @@ impl VideoRegistry {
         videos::scan_directory(&self.pool, dir_path)
     }
 
-    pub fn scan_directory_with_abort<F>(
+    pub(crate) fn scan_directory_with_abort<F>(
         &self,
         dir_path: &str,
         should_continue: F,

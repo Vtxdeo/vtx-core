@@ -1,0 +1,37 @@
+use std::collections::HashSet;
+use tempfile::tempdir;
+use vtx_core::storage::VideoRegistry;
+
+#[test]
+fn scan_directory_registers_new_videos() {
+    let temp_dir = tempdir().expect("tempdir");
+    let db_path = temp_dir.path().join("vtx.db");
+    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+
+    let root = temp_dir.path().join("media");
+    std::fs::create_dir_all(&root).expect("create root");
+
+    let video1 = root.join("video1.mp4");
+    let video2 = root.join("video2.mkv");
+    let not_video = root.join("note.txt");
+
+    std::fs::write(&video1, "x").expect("write");
+    std::fs::write(&video2, "x").expect("write");
+    std::fs::write(&not_video, "x").expect("write");
+
+    let new_videos = registry
+        .scan_directory(root.to_string_lossy().as_ref())
+        .expect("scan");
+    assert_eq!(new_videos.len(), 2);
+    let names: HashSet<String> = new_videos.into_iter().map(|v| v.filename).collect();
+    assert!(names.contains("video1.mp4"));
+    assert!(names.contains("video2.mkv"));
+
+    let second_scan = registry
+        .scan_directory(root.to_string_lossy().as_ref())
+        .expect("scan");
+    assert!(second_scan.is_empty());
+
+    let all = registry.list_all().expect("list");
+    assert_eq!(all.len(), 2);
+}
