@@ -3,15 +3,16 @@ use tempfile::tempdir;
 use vtx_core::runtime::manager::VtxPackageMetadata;
 use vtx_core::storage::VideoRegistry;
 
-fn make_registry() -> VideoRegistry {
+fn make_registry() -> (tempfile::TempDir, VideoRegistry) {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry")
+    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    (temp_dir, registry)
 }
 
 #[test]
 fn plugin_version_roundtrip() {
-    let registry = make_registry();
+    let (_guard, registry) = make_registry();
     assert_eq!(registry.get_plugin_version("p1"), 0);
     registry.set_plugin_version("p1", 2);
     assert_eq!(registry.get_plugin_version("p1"), 2);
@@ -19,7 +20,7 @@ fn plugin_version_roundtrip() {
 
 #[test]
 fn register_and_list_resources() {
-    let registry = make_registry();
+    let (_guard, registry) = make_registry();
     registry.register_resource("p1", "TABLE", "vtx_table");
     registry.register_resource("p1", "TABLE", "vtx_table");
     registry.register_resource("p1", "KV", "vtx_kv");
@@ -58,7 +59,7 @@ fn verify_installation_lock_and_release() {
 
 #[test]
 fn set_metadata_and_nuke_plugin() {
-    let registry = make_registry();
+    let (_guard, registry) = make_registry();
     let meta = VtxPackageMetadata {
         author: Some("me".to_string()),
         sdk_version: Some("1".to_string()),
@@ -109,7 +110,7 @@ fn set_metadata_and_nuke_plugin() {
 
 #[test]
 fn nuke_plugin_skips_invalid_table_names() {
-    let registry = make_registry();
+    let (_guard, registry) = make_registry();
     registry.register_resource("plugin", "TABLE", "good_table");
     registry.register_resource("plugin", "TABLE", "bad;table");
 
