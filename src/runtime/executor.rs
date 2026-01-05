@@ -75,6 +75,7 @@ impl PluginExecutor {
             current_user,
             event_bus: state.event_bus.clone(),
             permissions,
+            http_allowlist: runtime.policy.http.clone(),
         });
 
         let mut store = Store::new(&engine, ctx);
@@ -174,6 +175,7 @@ impl PluginExecutor {
             current_user,
             event_bus,
             permissions,
+            http_allowlist: runtime.policy.http.clone(),
         });
 
         let mut store = Store::new(&engine, ctx);

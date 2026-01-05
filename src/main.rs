@@ -85,6 +85,7 @@ async fn main() -> anyhow::Result<()> {
     api::ffmpeg::add_to_linker(&mut linker, |ctx| ctx)?;
     api::context::add_to_linker(&mut linker, |ctx| ctx)?;
     api::event_bus::add_to_linker(&mut linker, |ctx| ctx)?;
+    api::http_client::add_to_linker(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
 

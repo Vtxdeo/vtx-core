@@ -15,7 +15,7 @@ use crate::runtime::context::{SecurityPolicy, StreamContext, StreamContextConfig
 use crate::runtime::executor::{EventDispatchContext, PluginExecutor};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::auth_types::UserContext;
-use crate::runtime::host_impl::api::types::Manifest;
+use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
 
@@ -54,8 +54,8 @@ pub struct PluginStatus {
 #[derive(Debug, Clone, Default)]
 pub struct PluginPolicy {
     pub subscriptions: Vec<String>,
-    #[allow(dead_code)]
     pub permissions: Vec<String>,
+    pub http: Vec<HttpAllowRule>,
 }
 
 #[derive(Clone)]
@@ -463,6 +463,7 @@ impl PluginManager {
             current_user: None,
             event_bus: self.event_bus.clone(),
             permissions: runtime.policy.permissions.iter().cloned().collect(),
+            http_allowlist: runtime.policy.http.clone(),
         });
         let mut store = wasmtime::Store::new(&self.engine, ctx);
         store.limiter(|s| &mut s.limiter);

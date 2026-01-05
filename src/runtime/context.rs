@@ -3,6 +3,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
 
 use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
+use crate::runtime::host_impl::api::types::HttpAllowRule;
 use crate::storage::VideoRegistry;
 
 /// 安全策略等级
@@ -31,6 +32,7 @@ pub struct StreamContext {
     pub current_user: Option<CurrentUser>,
     pub event_bus: Arc<EventBus>,
     pub permissions: std::collections::HashSet<String>,
+    pub http_allowlist: Vec<HttpAllowRule>,
     /// VtxFfmpeg 管理器引用
     /// 允许 Host Function 访问工具链配置
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
@@ -46,6 +48,7 @@ pub struct StreamContextConfig {
     pub current_user: Option<CurrentUser>,
     pub event_bus: Arc<EventBus>,
     pub permissions: std::collections::HashSet<String>,
+    pub http_allowlist: Vec<HttpAllowRule>,
 }
 
 #[derive(Debug, Clone)]
@@ -65,10 +68,11 @@ impl StreamContext {
             policy,
             plugin_id,
             max_buffer_read_bytes,
-            current_user,
-            event_bus,
-            permissions,
-        } = config;
+        current_user,
+        event_bus,
+        permissions,
+        http_allowlist,
+    } = config;
         let wasi = WasiCtxBuilder::new()
             .inherit_stdio()
             .env("VTX_ENV", "production")
@@ -86,6 +90,7 @@ impl StreamContext {
             current_user,
             event_bus,
             permissions,
+            http_allowlist,
             vtx_ffmpeg,
         }
     }
