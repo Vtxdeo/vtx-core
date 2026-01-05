@@ -40,7 +40,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 config = "0.14"
 
 vtx-format = "0.1.6"
-vtx-protocol = { path = "../vtx-protocol/packages/rust" }
+vtx-protocol = "3.5.2"
 futures-util = "0.3.31"
 async-trait = "0.1"
 sqlparser = "0.45"
@@ -48,7 +48,7 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 url = "2"
 
 [build-dependencies]
-vtx-protocol = "3.5.0"
+vtx-protocol = "3.5.2"
 
 [dev-dependencies]
 http-body-util = "0.1"
