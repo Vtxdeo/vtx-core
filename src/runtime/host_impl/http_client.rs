@@ -1,4 +1,3 @@
-
 use std::collections::HashSet;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 
@@ -185,9 +184,7 @@ fn path_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
 fn method_matches(rule: &api::types::HttpAllowRule, method: &str) -> bool {
     match &rule.methods {
         None => true,
-        Some(methods) => methods
-            .iter()
-            .any(|m| m.to_ascii_uppercase() == method),
+        Some(methods) => methods.iter().any(|m| m.to_ascii_uppercase() == method),
     }
 }
 
@@ -215,11 +212,7 @@ fn build_redirect_policy(
         return Policy::none();
     }
 
-    match rule
-        .redirect_policy
-        .as_deref()
-        .unwrap_or("same-origin")
-    {
+    match rule.redirect_policy.as_deref().unwrap_or("same-origin") {
         "allowlist" => Policy::custom(move |attempt| {
             if let Ok(url) = Url::parse(attempt.url().as_str()) {
                 if match_allow_rule(&rules, &url, "GET", &[]).is_some() {

@@ -68,11 +68,11 @@ impl StreamContext {
             policy,
             plugin_id,
             max_buffer_read_bytes,
-        current_user,
-        event_bus,
-        permissions,
-        http_allowlist,
-    } = config;
+            current_user,
+            event_bus,
+            permissions,
+            http_allowlist,
+        } = config;
         let wasi = WasiCtxBuilder::new()
             .inherit_stdio()
             .env("VTX_ENV", "production")
