@@ -1,7 +1,7 @@
 use super::api;
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
-use crate::runtime::host_impl::ffmpeg_policy::validate_ffmpeg_args;
+use crate::runtime::host_impl::ffmpeg_policy::validate_ffmpeg_options;
 use std::process::Stdio;
 use wasmtime::component::Resource;
 
@@ -9,7 +9,7 @@ use wasmtime::component::Resource;
 impl api::ffmpeg::Host for StreamContext {
     async fn execute(
         &mut self,
-        params: api::ffmpeg::TranscodeParams,
+        params: api::ffmpeg::TranscodeProfile,
     ) -> Result<Resource<RealBuffer>, String> {
         if self.policy == SecurityPolicy::Plugin && !self.has_permission("ffmpeg:execute") {
             return Err("Permission Denied".into());
@@ -53,14 +53,15 @@ impl api::ffmpeg::Host for StreamContext {
         let handle = tokio::runtime::Handle::try_current()
             .map_err(|e| format!("Failed to get tokio runtime: {}", e))?;
 
-        validate_ffmpeg_args(&params.args)?;
+        validate_ffmpeg_options(&params.options)?;
+        let args = build_ffmpeg_args(&params.options)?;
 
         let binary_path = binary.path.clone();
         let child_result = handle.block_on(async {
             let mut cmd = tokio::process::Command::new(&binary_path);
 
             cmd.arg("-i").arg(&input_arg);
-            cmd.args(&params.args);
+            cmd.args(&args);
 
             cmd.stdout(Stdio::piped());
             cmd.stderr(Stdio::inherit());
@@ -93,4 +94,39 @@ impl api::ffmpeg::Host for StreamContext {
             .push(rb)
             .map_err(|e| format!("Resource Table Error: {}", e))
     }
+}
+
+fn build_ffmpeg_args(options: &[api::ffmpeg::FfmpegOption]) -> Result<Vec<String>, String> {
+    let mut args = Vec::with_capacity(options.len() + 1);
+
+    for option in options {
+        let raw_key = option.key.trim();
+        if raw_key.is_empty() {
+            return Err("Permission Denied: ffmpeg option key cannot be empty".into());
+        }
+
+        let mut key = raw_key;
+        let mut value = option.value.as_deref();
+        if value.is_none() {
+            if let Some((key_part, value_part)) = raw_key.split_once('=') {
+                key = key_part.trim();
+                value = Some(value_part.trim());
+            }
+        }
+
+        let normalized_key = if key.starts_with('-') {
+            key.to_string()
+        } else {
+            format!("-{key}")
+        };
+
+        match value {
+            Some(value) => args.push(format!("{normalized_key}={value}")),
+            None => args.push(normalized_key),
+        }
+    }
+
+    args.push("pipe:1".to_string());
+
+    Ok(args)
 }
