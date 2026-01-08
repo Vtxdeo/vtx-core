@@ -450,7 +450,7 @@ impl PluginManager {
     ) -> Result<UserContext, u16> {
         let limits = wasmtime::StoreLimitsBuilder::new()
             .instances(1)
-            .memory_size(10 * 1024 * 1024)
+            .memory_size(self.max_memory_bytes)
             .build();
 
         let ctx = StreamContext::new_secure(StreamContextConfig {
