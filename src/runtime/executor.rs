@@ -38,7 +38,7 @@ impl PluginExecutor {
         method: String,
         query: String,
         current_user: Option<CurrentUser>,
-    ) -> Result<(RealBuffer, u16), String> {
+    ) -> Result<(Option<RealBuffer>, u16), String> {
         let engine = state.engine.clone();
         let registry = state.registry.clone();
         // 获取全局的 ffmpeg 管理器引用
@@ -106,9 +106,9 @@ impl PluginExecutor {
                 .table
                 .delete(resource_handle)
                 .map_err(|_| "Invalid buffer handle".to_string())?;
-            Ok((buffer, response.status))
+            Ok((Some(buffer), response.status))
         } else {
-            Err("NO_CONTENT".to_string())
+            Ok((None, response.status))
         }
     }
 

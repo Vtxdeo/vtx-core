@@ -50,25 +50,20 @@ pub async fn gateway_handler(
 
     // 3. 处理响应
     match result {
-        // 透传 status_code，确保插件可以返回 403, 500, 201 等状态码
-        Ok((buffer, status_code)) => {
+        // ?? status_code????????? 403, 500, 201 ????
+        Ok((Some(buffer), status_code)) => {
             StreamProtocolLayer::process(buffer, &headers, status_code).await
         }
+        Ok((None, status_code)) => StatusCode::from_u16(status_code)
+            .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)
+            .into_response(),
         Err(msg) => {
-            if msg == "NO_CONTENT" {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(errors::plugin_not_found_json("Resource not found")),
-                )
-                    .into_response()
-            } else {
-                tracing::error!("[Gateway] Execution failed: {}", msg);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(errors::plugin_internal_error_json(&msg)),
-                )
-                    .into_response()
-            }
+            tracing::error!("[Gateway] Execution failed: {}", msg);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(errors::plugin_internal_error_json(&msg)),
+            )
+                .into_response()
         }
     }
 }
