@@ -8,6 +8,7 @@ use axum::{
     routing::{any, delete, get, post},
     Router,
 };
+use std::io;
 use std::sync::Arc;
 use tower_http::{catch_panic::CatchPanicLayer, cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
@@ -18,6 +19,7 @@ use crate::runtime::{
     bus::EventBus,
     ffmpeg::VtxFfmpegManager,
     host_impl::api,
+    host_impl::ipc_transport::IpcTransport,
     jobs,
     manager::{PluginManager, PluginManagerConfig},
 };
@@ -37,6 +39,7 @@ async fn main() -> anyhow::Result<()> {
                 .add_directive("vtx_core=info".parse()?)
                 .add_directive("tower_http=debug".parse()?),
         )
+        .with_writer(io::stderr)
         .init();
 
     info!("[Startup] vtxdeo Core V0.1.3 initializing...");
@@ -96,6 +99,9 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化插件管理器 (传入 vtx_ffmpeg_manager)
     let event_bus = Arc::new(EventBus::new(256));
+    let (ipc_outbound_tx, ipc_outbound_rx) = tokio::sync::mpsc::channel(100);
+    IpcTransport::spawn(ipc_outbound_rx);
+
 
     let plugin_manager = PluginManager::new(PluginManagerConfig {
         engine: engine.clone(),
@@ -118,6 +124,7 @@ async fn main() -> anyhow::Result<()> {
         config: settings.clone(),
         vtx_ffmpeg: vtx_ffmpeg_manager,
         event_bus,
+        ipc_outbound: ipc_outbound_tx,
     });
 
     jobs::recover_startup(state.registry.clone(), settings.job_queue.clone()).await;

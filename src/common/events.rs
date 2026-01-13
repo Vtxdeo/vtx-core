@@ -16,3 +16,17 @@ pub struct VtxEvent {
     pub context: EventContext,
     pub occurred_at: u64,
 }
+
+// 定义 Core 向 Omni 发出的请求
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum SystemRequest {
+    RequestDependency {
+        name: String,    // e.g., "ffmpeg"
+        profile: String, // e.g., "animator"
+        version: String,
+    },
+    ReportStatus {
+        code: u16,
+        message: String,
+    },
+}

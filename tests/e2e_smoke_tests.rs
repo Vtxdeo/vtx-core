@@ -106,6 +106,7 @@ fn spawn_server() -> (ChildGuard, String, u16, tempfile::TempDir) {
     let temp_dir = tempdir().expect("tempdir");
     let plugin_dir = temp_dir.path().join("plugins");
     let ffmpeg_dir = temp_dir.path().join("ffmpeg");
+    let ffmpeg_path = temp_dir.path().join("ffmpeg.cmd");
     let db_path = temp_dir.path().join("vtxdeo.db");
     let config_path = temp_dir.path().join("config.toml");
     let normalize = |path: &std::path::Path| path.to_string_lossy().replace('\\', "/");
@@ -121,9 +122,12 @@ vtx_ffmpeg.binary_root = \"{ffmpeg}\"\n",
         ffmpeg = normalize(&ffmpeg_dir)
     );
     std::fs::write(&config_path, config_contents).expect("write config");
+    std::fs::write(&ffmpeg_path, "@echo off\r\necho ffmpeg version 1.0\r\n")
+        .expect("write ffmpeg stub");
 
     let mut child = Command::new(env!("CARGO_BIN_EXE_vtx-core"))
         .current_dir(temp_dir.path())
+        .env("VTX_FFMPEG_BIN", &ffmpeg_path)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

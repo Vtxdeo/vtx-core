@@ -8,6 +8,7 @@ use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tempfile::tempdir;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
@@ -36,18 +37,23 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     let db_path = temp_dir.path().join("vtx.db");
     let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
+    let ffmpeg_path = temp_dir.path().join("ffmpeg.cmd");
+    std::fs::write(
+        &ffmpeg_path,
+        "@echo off\r\necho ffmpeg version 1.0\r\n",
+    )
+    .expect("ffmpeg stub");
+    std::env::set_var("VTX_FFMPEG_BIN", &ffmpeg_path);
+
     let mut wasm_config = wasmtime::Config::new();
     wasm_config.wasm_component_model(true);
     wasm_config.async_support(true);
     let engine = wasmtime::Engine::new(&wasm_config).expect("engine");
     let linker = Linker::<StreamContext>::new(&engine);
 
-    let vtx_ffmpeg = Arc::new(VtxFfmpegManager::new(
-        temp_dir.path().join("ffmpeg"),
-        30,
-        false,
-    ));
+    let vtx_ffmpeg = Arc::new(VtxFfmpegManager::new(30).expect("vtx_ffmpeg"));
     let event_bus = Arc::new(EventBus::new(8));
+    let (ipc_outbound, _ipc_inbound) = mpsc::channel(8);
 
     let plugin_manager = PluginManager::new(PluginManagerConfig {
         engine: engine.clone(),
@@ -71,6 +77,7 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
         config,
         vtx_ffmpeg,
         event_bus,
+        ipc_outbound,
     });
 
     (state, temp_dir)

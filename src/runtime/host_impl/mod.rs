@@ -7,6 +7,7 @@ pub mod event_bus;
 pub mod ffmpeg;
 pub mod ffmpeg_policy;
 pub mod http_client;
+pub mod ipc_transport;
 pub mod sql;
 pub mod sql_policy;
 pub mod stream_io;

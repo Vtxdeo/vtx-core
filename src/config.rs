@@ -47,6 +47,7 @@ pub struct PluginSettings {
 pub struct VtxFfmpegSettings {
     /// vtx-ffmpeg 二进制工具链的根目录
     /// 系统将自动扫描该目录下符合 vtx-ffmpeg-{profile} 命名规范的可执行文件
+    #[allow(dead_code)]
     pub binary_root: PathBuf,
     /// 子进程执行超时时间（单位：秒）
     /// 用于防止异常进程僵死占用系统资源，0 表示不限制（不推荐）
@@ -56,6 +57,7 @@ pub struct VtxFfmpegSettings {
     /// 若启用且无法在 binary_root 找到合适的 Profile，
     /// 将尝试调用环境变量 PATH 中的 `ffmpeg` 命令作为兜底方案。
     #[serde(default)]
+    #[allow(dead_code)]
     pub use_system_binary: bool,
 }
 
