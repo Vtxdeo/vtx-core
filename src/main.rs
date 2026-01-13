@@ -91,10 +91,8 @@ async fn main() -> anyhow::Result<()> {
 
     // 初始化 vtx-ffmpeg 中间层管理器
     let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(
-        settings.vtx_ffmpeg.binary_root.clone(),
         settings.vtx_ffmpeg.execution_timeout_secs,
-        settings.vtx_ffmpeg.use_system_binary,
-    ));
+    )?);
 
     // 初始化插件管理器 (传入 vtx_ffmpeg_manager)
     let event_bus = Arc::new(EventBus::new(256));
