@@ -61,20 +61,13 @@ pub struct VtxFfmpegSettings {
     pub use_system_binary: bool,
 }
 
-/// å¼‚æ­¥ä»»åŠ¡é˜Ÿåˆ—é…ç½®
 #[derive(Debug, Deserialize, Clone)]
 pub struct JobQueueSettings {
-    /// æ‰«æé˜Ÿåˆ—çš„è½®è¯¢é—´éš”ï¼ˆmsï¼‰
     pub poll_interval_ms: u64,
-    /// æœ€å¤§å¹¶å‘ worker æ•°
     pub max_concurrent: u32,
-    /// ä»»åŠ¡æœ€é•¿è¿è¡Œæ—¶é—´ï¼ˆsï¼‰
     pub timeout_secs: u64,
-    /// è¶…æ—¶æ‰«æé—´éš”ï¼ˆmsï¼‰
     pub sweep_interval_ms: u64,
-    /// worker å æœ‰ä»»åŠ¡çš„ç§Ÿçº¦æ—¶é—´ï¼ˆsï¼‰
     pub lease_secs: u64,
-    /// ç§Ÿçº¦å›žæ”¶æ‰«æé—´éš”ï¼ˆmsï¼‰
     pub reclaim_interval_ms: u64,
     #[serde(default)]
     pub adaptive_scan: AdaptiveScanSettings,
@@ -120,14 +113,10 @@ impl Settings {
             .set_default("plugins.max_memory_mb", 100)?
             // 默认限制单次读取 16MB
             .set_default("plugins.max_buffer_read_mb", 16)?
-            // 默认不指定鉴权提供者
             .set_default::<&str, Option<String>>("plugins.auth_provider", None)?
-            // VtxFfmpeg 默认配置
             .set_default("vtx_ffmpeg.binary_root", "./bin/ffmpeg")?
             .set_default("vtx_ffmpeg.execution_timeout_secs", 600)?
-            // 默认关闭系统级回退，保证行为可预测
             .set_default("vtx_ffmpeg.use_system_binary", false)?
-            // Job Queue é»˜è®¤é…ç½®
             .set_default("job_queue.poll_interval_ms", 1500)?
             .set_default("job_queue.max_concurrent", 1)?
             .set_default("job_queue.timeout_secs", 3600)?
@@ -140,9 +129,7 @@ impl Settings {
             .set_default("job_queue.adaptive_scan.step_up", 1)?
             .set_default("job_queue.adaptive_scan.step_down", 1)?
             .set_default("job_queue.adaptive_scan.check_interval_ms", 2000)?
-            // 配置文件（可选，文件名为 config.{toml/json/yaml}）
             .add_source(File::with_name("config").required(false))
-            // 环境变量支持（如 VTX_SERVER__PORT=8080）
             .add_source(Environment::with_prefix("VTX").separator("__"));
 
         let config = builder.build()?;

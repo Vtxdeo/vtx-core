@@ -50,7 +50,6 @@ pub async fn gateway_handler(
 
     // 3. 处理响应
     match result {
-        // ?? status_code????????? 403, 500, 201 ????
         Ok((Some(buffer), status_code)) => {
             StreamProtocolLayer::process(buffer, &headers, status_code).await
         }
