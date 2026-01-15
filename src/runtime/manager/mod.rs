@@ -2,7 +2,7 @@ pub mod loader;
 pub mod migration_policy;
 pub mod watcher;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
@@ -19,9 +19,22 @@ use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct VtxAuthor {
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct VtxPackageMetadata {
     pub author: Option<String>,
+    pub authors: Option<Vec<VtxAuthor>>,
+    pub description: Option<String>,
+    pub license: Option<String>,
+    pub homepage: Option<String>,
+    pub repository: Option<String>,
+    pub keywords: Option<Vec<String>>,
+    pub version: Option<String>,
     pub sdk_version: Option<String>,
     pub package: Option<String>,
     pub language: Option<String>,

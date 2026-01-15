@@ -231,6 +231,13 @@ fn parse_vtx_metadata_json(bytes: &[u8]) -> Option<super::VtxPackageMetadata> {
     #[derive(serde::Deserialize)]
     struct Meta {
         author: Option<String>,
+        authors: Option<Vec<super::VtxAuthor>>,
+        description: Option<String>,
+        license: Option<String>,
+        homepage: Option<String>,
+        repository: Option<String>,
+        keywords: Option<Vec<String>>,
+        version: Option<String>,
         sdk_version: Option<String>,
         package: Option<String>,
         language: Option<String>,
@@ -241,6 +248,13 @@ fn parse_vtx_metadata_json(bytes: &[u8]) -> Option<super::VtxPackageMetadata> {
     let parsed: Meta = serde_json::from_str(text).ok()?;
     Some(super::VtxPackageMetadata {
         author: parsed.author,
+        authors: parsed.authors,
+        description: parsed.description,
+        license: parsed.license,
+        homepage: parsed.homepage,
+        repository: parsed.repository,
+        keywords: parsed.keywords,
+        version: parsed.version,
         sdk_version: parsed.sdk_version,
         package: parsed.package,
         language: parsed.language,
