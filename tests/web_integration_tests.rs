@@ -8,8 +8,8 @@ use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use serde_json::Value;
 use std::sync::Arc;
-use tokio::sync::mpsc;
 use tempfile::tempdir;
+use tokio::sync::mpsc;
 use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -38,11 +38,7 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
     let ffmpeg_path = temp_dir.path().join("ffmpeg.cmd");
-    std::fs::write(
-        &ffmpeg_path,
-        "@echo off\r\necho ffmpeg version 1.0\r\n",
-    )
-    .expect("ffmpeg stub");
+    std::fs::write(&ffmpeg_path, "@echo off\r\necho ffmpeg version 1.0\r\n").expect("ffmpeg stub");
     std::env::set_var("VTX_FFMPEG_BIN", &ffmpeg_path);
 
     let mut wasm_config = wasmtime::Config::new();

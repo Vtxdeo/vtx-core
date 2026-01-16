@@ -26,12 +26,10 @@ impl IpcTransport {
                             version,
                         }),
                     ),
-                    SystemRequest::ReportStatus { code, message } => {
-                        IpcEnvelope::new(
-                            "SYS_REPORT_STATUS",
-                            SystemPayload::Status(StatusPayload { code, message }),
-                        )
-                    }
+                    SystemRequest::ReportStatus { code, message } => IpcEnvelope::new(
+                        "SYS_REPORT_STATUS",
+                        SystemPayload::Status(StatusPayload { code, message }),
+                    ),
                 };
 
                 match serde_json::to_string(&envelope) {
@@ -60,10 +58,7 @@ impl IpcTransport {
 
                 match serde_json::from_str::<serde_json::Value>(&line) {
                     Ok(value) => {
-                        let msg_type = value
-                            .get("t")
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("UNKNOWN");
+                        let msg_type = value.get("t").and_then(|v| v.as_str()).unwrap_or("UNKNOWN");
 
                         match msg_type {
                             "SYS_RESOURCE_READY" => {

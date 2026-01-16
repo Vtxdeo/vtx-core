@@ -64,9 +64,8 @@ impl VtxFfmpegManager {
 }
 
 fn resolve_ffmpeg_path() -> Result<PathBuf, FatalError> {
-    let raw = env::var("VTX_FFMPEG_BIN").map_err(|_| {
-        FatalError::EnvironmentBroken("VTX_FFMPEG_BIN is not set".to_string())
-    })?;
+    let raw = env::var("VTX_FFMPEG_BIN")
+        .map_err(|_| FatalError::EnvironmentBroken("VTX_FFMPEG_BIN is not set".to_string()))?;
     Ok(PathBuf::from(raw))
 }
 

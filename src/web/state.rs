@@ -1,5 +1,5 @@
-use crate::config::Settings;
 use crate::common::events::SystemRequest;
+use crate::config::Settings;
 use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::manager::PluginManager;

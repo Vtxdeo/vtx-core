@@ -102,7 +102,6 @@ async fn main() -> anyhow::Result<()> {
     let (ipc_outbound_tx, ipc_outbound_rx) = tokio::sync::mpsc::channel(100);
     IpcTransport::spawn(ipc_outbound_rx);
 
-
     let plugin_manager = PluginManager::new(PluginManagerConfig {
         engine: engine.clone(),
         plugin_dir: settings.plugins.location.clone(),
