@@ -62,6 +62,13 @@ fn set_metadata_and_nuke_plugin() {
     let (_guard, registry) = make_registry();
     let meta = VtxPackageMetadata {
         author: Some("me".to_string()),
+        authors: None,
+        description: None,
+        license: None,
+        homepage: None,
+        repository: None,
+        keywords: None,
+        version: None,
         sdk_version: Some("1".to_string()),
         package: Some("pkg".to_string()),
         language: Some("rust".to_string()),
