@@ -1,10 +1,33 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 use tempfile::tempdir;
+
+fn write_ffmpeg_stub(dir: &Path) -> PathBuf {
+    let (name, contents) = if cfg!(windows) {
+        ("ffmpeg.cmd", "@echo off\r\necho ffmpeg version 1.0\r\n")
+    } else {
+        ("ffmpeg", "#!/bin/sh\necho ffmpeg version 1.0\n")
+    };
+    let path = dir.join(name);
+    std::fs::write(&path, contents).expect("write ffmpeg stub");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path)
+            .expect("ffmpeg metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).expect("ffmpeg perms");
+    }
+
+    path
+}
 
 fn pick_free_port() -> u16 {
     std::net::TcpListener::bind("127.0.0.1:0")
@@ -106,7 +129,7 @@ fn spawn_server() -> (ChildGuard, String, u16, tempfile::TempDir) {
     let temp_dir = tempdir().expect("tempdir");
     let plugin_dir = temp_dir.path().join("plugins");
     let ffmpeg_dir = temp_dir.path().join("ffmpeg");
-    let ffmpeg_path = temp_dir.path().join("ffmpeg.cmd");
+    let ffmpeg_path = write_ffmpeg_stub(temp_dir.path());
     let db_path = temp_dir.path().join("vtxdeo.db");
     let config_path = temp_dir.path().join("config.toml");
     let normalize = |path: &std::path::Path| path.to_string_lossy().replace('\\', "/");
@@ -122,9 +145,6 @@ vtx_ffmpeg.binary_root = \"{ffmpeg}\"\n",
         ffmpeg = normalize(&ffmpeg_dir)
     );
     std::fs::write(&config_path, config_contents).expect("write config");
-    std::fs::write(&ffmpeg_path, "@echo off\r\necho ffmpeg version 1.0\r\n")
-        .expect("write ffmpeg stub");
-
     let mut child = Command::new(env!("CARGO_BIN_EXE_vtx-core"))
         .current_dir(temp_dir.path())
         .env("VTX_FFMPEG_BIN", &ffmpeg_path)

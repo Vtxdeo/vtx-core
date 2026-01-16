@@ -7,6 +7,7 @@ use axum::{
 use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use serde_json::Value;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tempfile::tempdir;
 use tokio::sync::mpsc;
@@ -32,13 +33,34 @@ use vtx_core::{
 };
 use wasmtime::component::Linker;
 
+fn write_ffmpeg_stub(dir: &Path) -> PathBuf {
+    let (name, contents) = if cfg!(windows) {
+        ("ffmpeg.cmd", "@echo off\r\necho ffmpeg version 1.0\r\n")
+    } else {
+        ("ffmpeg", "#!/bin/sh\necho ffmpeg version 1.0\n")
+    };
+    let path = dir.join(name);
+    std::fs::write(&path, contents).expect("ffmpeg stub");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&path)
+            .expect("ffmpeg metadata")
+            .permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&path, perms).expect("ffmpeg perms");
+    }
+
+    path
+}
+
 async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
     let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
-    let ffmpeg_path = temp_dir.path().join("ffmpeg.cmd");
-    std::fs::write(&ffmpeg_path, "@echo off\r\necho ffmpeg version 1.0\r\n").expect("ffmpeg stub");
+    let ffmpeg_path = write_ffmpeg_stub(temp_dir.path());
     std::env::set_var("VTX_FFMPEG_BIN", &ffmpeg_path);
 
     let mut wasm_config = wasmtime::Config::new();
