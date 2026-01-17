@@ -7,7 +7,9 @@ use axum::{
     Json as AxumJson,
 };
 use serde::Deserialize;
+use std::path::Path;
 use std::sync::Arc;
+use url::Url;
 
 #[derive(Deserialize)]
 pub struct ScanRequest {
@@ -84,7 +86,8 @@ fn validate_scan_path(
     allowed_roots: &[String],
     vfs: &crate::vfs::VfsManager,
 ) -> Result<String, String> {
-    vfs.match_allowed_prefix(requested, allowed_roots)
+    let requested_uri = normalize_request_uri(vfs, requested, false)?;
+    vfs.match_allowed_prefix(&requested_uri, allowed_roots)
 }
 
 /// 列表查询接口
@@ -135,9 +138,9 @@ pub async fn add_scan_root_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRootRequest>,
 ) -> AxumJson<serde_json::Value> {
-    let uri = match state.vfs.ensure_prefix_uri(&payload.path) {
+    let uri = match normalize_request_uri(&state.vfs, &payload.path, true) {
         Ok(value) => value,
-        Err(e) => return AxumJson(errors::admin_bad_request_json(&e.to_string())),
+        Err(message) => return AxumJson(errors::admin_bad_request_json(&message)),
     };
     match state.registry.add_scan_root(&uri) {
         Ok(resolved) => AxumJson(success_json(serde_json::json!({ "path": resolved }))),
@@ -149,14 +152,61 @@ pub async fn remove_scan_root_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRootRequest>,
 ) -> AxumJson<serde_json::Value> {
-    let uri = match state.vfs.ensure_prefix_uri(&payload.path) {
+    let uri = match normalize_request_uri(&state.vfs, &payload.path, true) {
         Ok(value) => value,
-        Err(e) => return AxumJson(errors::admin_bad_request_json(&e.to_string())),
+        Err(message) => return AxumJson(errors::admin_bad_request_json(&message)),
     };
     match state.registry.remove_scan_root(&uri) {
         Ok(resolved) => AxumJson(success_json(serde_json::json!({ "path": resolved }))),
         Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
+}
+
+fn normalize_request_uri(
+    vfs: &crate::vfs::VfsManager,
+    raw: &str,
+    ensure_prefix: bool,
+) -> Result<String, String> {
+    let uri = if looks_like_path(raw) {
+        let path = Path::new(raw);
+        let abs = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .map_err(|e| e.to_string())?
+                .join(path)
+        };
+        Url::from_file_path(&abs)
+            .map_err(|_| format!("Invalid file path: {}", abs.display()))?
+            .to_string()
+    } else {
+        raw.to_string()
+    };
+
+    let normalized = if ensure_prefix {
+        vfs.ensure_prefix_uri(&uri)
+    } else {
+        vfs.normalize_uri(&uri)
+    };
+    normalized.map_err(|e| e.to_string())
+}
+
+fn looks_like_path(value: &str) -> bool {
+    if value.starts_with("\\\\") {
+        return true;
+    }
+    let bytes = value.as_bytes();
+    if bytes.len() >= 2 {
+        let letter = bytes[0];
+        if letter.is_ascii_alphabetic() && bytes[1] == b':' {
+            return true;
+        }
+    }
+    !looks_like_uri(value)
+}
+
+fn looks_like_uri(value: &str) -> bool {
+    value.contains("://") || value.starts_with("file:") || value.starts_with("s3:")
 }
 
 pub async fn submit_job_handler(

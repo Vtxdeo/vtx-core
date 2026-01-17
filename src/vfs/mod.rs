@@ -51,21 +51,7 @@ impl VfsManager {
     }
 
     pub fn normalize_uri(&self, uri: &str) -> anyhow::Result<String> {
-        let raw = if looks_like_uri(uri) {
-            uri.to_string()
-        } else {
-            let path = Path::new(uri);
-            let abs = if path.is_absolute() {
-                path.to_path_buf()
-            } else {
-                std::env::current_dir()?.join(path)
-            };
-            Url::from_file_path(&abs)
-                .map_err(|_| anyhow::anyhow!("Invalid file path: {}", abs.display()))?
-                .to_string()
-        };
-
-        let mut url = Url::parse(&raw).context("Invalid URI")?;
+        let mut url = Url::parse(uri).context("Invalid URI")?;
         let raw_path = url.path();
         let normalized = normalize_path(raw_path);
         url.set_path(&normalized);
@@ -394,8 +380,4 @@ fn to_range(start: u64, end: u64) -> anyhow::Result<std::ops::Range<usize>> {
 fn file_key(root: &Path) -> String {
     let raw = root.to_string_lossy().replace('\\', "/");
     format!("file://{}", raw.trim_end_matches('/'))
-}
-
-fn looks_like_uri(value: &str) -> bool {
-    value.contains("://") || value.starts_with("file:") || value.starts_with("s3:")
 }
