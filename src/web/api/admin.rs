@@ -7,7 +7,7 @@ use axum::{
     Json as AxumJson,
 };
 use serde::Deserialize;
-use std::path::Path;
+use std::path::Path as StdPath;
 use std::sync::Arc;
 use url::Url;
 
@@ -168,7 +168,7 @@ fn normalize_request_uri(
     ensure_prefix: bool,
 ) -> Result<String, String> {
     let uri = if looks_like_path(raw) {
-        let path = Path::new(raw);
+        let path = StdPath::new(raw);
         let abs = if path.is_absolute() {
             path.to_path_buf()
         } else {
