@@ -20,8 +20,9 @@ pub(crate) fn add_scan_root(
             let path = url
                 .to_file_path()
                 .map_err(|_| anyhow::anyhow!("Invalid file URI"))?;
-            let metadata = std::fs::metadata(&path)
-                .map_err(|_| anyhow::anyhow!("Scan root directory not found: {}", path.display()))?;
+            let metadata = std::fs::metadata(&path).map_err(|_| {
+                anyhow::anyhow!("Scan root directory not found: {}", path.display())
+            })?;
             if !metadata.is_dir() {
                 return Err(anyhow::anyhow!(
                     "Scan root must be a directory: {}",
