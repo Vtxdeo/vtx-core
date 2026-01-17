@@ -4,6 +4,7 @@ use crate::storage::{
     videos::{ScanAbort, ScanOutcome},
     VideoRegistry,
 };
+use crate::vfs::VfsManager;
 use serde::Deserialize;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -65,7 +66,7 @@ impl AdaptiveScanLimiter {
     }
 }
 
-pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
+pub fn spawn_workers(registry: VideoRegistry, vfs: Arc<VfsManager>, settings: JobQueueSettings) {
     let workers = std::cmp::max(1, settings.max_concurrent) as usize;
     let adaptive = settings.adaptive_scan.clone();
     let scan_limiter = if adaptive.enabled {
@@ -143,6 +144,7 @@ pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
     for idx in 0..workers {
         let worker_id = format!("worker-{}", idx + 1);
         let registry = registry.clone();
+        let vfs = vfs.clone();
         let scan_limiter = scan_limiter.clone();
         let poll_interval = Duration::from_millis(settings.poll_interval_ms);
         let timeout_secs = settings.timeout_secs;
@@ -242,10 +244,12 @@ pub fn spawn_workers(registry: VideoRegistry, settings: JobQueueSettings) {
                             None
                         };
                         let job_id_for_handle = job_id.clone();
+                        let vfs = vfs.clone();
                         let handle_result = tokio::task::spawn_blocking(move || {
                             let _permit = scan_permit;
                             handle_job(
                                 &registry_for_job,
+                                vfs,
                                 &job_id_for_handle,
                                 &job_type,
                                 &payload,
@@ -334,6 +338,7 @@ pub async fn recover_startup(registry: VideoRegistry, settings: JobQueueSettings
 
 fn handle_job(
     registry: &VideoRegistry,
+    vfs: Arc<VfsManager>,
     job_id: &str,
     job_type: &str,
     payload: &str,
@@ -348,15 +353,14 @@ fn handle_job(
         "noop" => registry
             .complete_job(job_id, r#"{"status":"ok"}"#)
             .map_err(|e| e.to_string()),
-        "scan-directory" => {
-            handle_scan_directory(registry, job_id, &normalized_payload, timeout_secs)
-        }
+        "scan-directory" => handle_scan_directory(registry, vfs, job_id, &normalized_payload, timeout_secs),
         _ => Err("unsupported job_type".into()),
     }
 }
 
 fn handle_scan_directory(
     registry: &VideoRegistry,
+    vfs: Arc<VfsManager>,
     job_id: &str,
     payload: &serde_json::Value,
     timeout_secs: u64,
@@ -366,7 +370,7 @@ fn handle_scan_directory(
     let allowed_roots = registry
         .list_scan_roots()
         .map_err(|e| format!("Load scan roots failed: {}", e))?;
-    let scan_root = validate_scan_path(&payload.path, &allowed_roots)?;
+    let scan_root = validate_scan_path(&payload.path, &allowed_roots, &vfs)?;
 
     let running = Arc::new(AtomicBool::new(true));
     let abort_reason = Arc::new(AtomicUsize::new(0));
@@ -409,8 +413,9 @@ fn handle_scan_directory(
         })
     };
 
-    let outcome = registry
-        .scan_directory_with_abort(&scan_root.to_string_lossy(), || {
+    let handle = tokio::runtime::Handle::current();
+    let outcome = handle
+        .block_on(registry.scan_directory_with_abort(&vfs, &scan_root, || {
             if running.load(Ordering::Relaxed) {
                 Ok(())
             } else {
@@ -419,7 +424,7 @@ fn handle_scan_directory(
                     _ => Err(ScanAbort::Canceled),
                 }
             }
-        })
+        }))
         .map_err(|e| format!("Scan failed: {}", e))?;
 
     done.store(true, Ordering::Relaxed);
@@ -459,28 +464,8 @@ fn handle_scan_directory(
 
 fn validate_scan_path(
     requested: &str,
-    allowed_roots: &[std::path::PathBuf],
-) -> Result<std::path::PathBuf, String> {
-    let resolved = std::fs::canonicalize(requested).map_err(|_| "Invalid scan path".to_string())?;
-
-    if !resolved.is_dir() {
-        return Err("Scan path must be a directory".into());
-    }
-
-    let mut has_root = false;
-    for root in allowed_roots {
-        let Ok(root_path) = std::fs::canonicalize(root) else {
-            continue;
-        };
-        has_root = true;
-        if resolved.starts_with(&root_path) {
-            return Ok(resolved);
-        }
-    }
-
-    if !has_root {
-        return Err("Scan roots not configured".into());
-    }
-
-    Err("Scan path not allowed".into())
+    allowed_roots: &[String],
+    vfs: &VfsManager,
+) -> Result<String, String> {
+    vfs.match_allowed_prefix(requested, allowed_roots)
 }

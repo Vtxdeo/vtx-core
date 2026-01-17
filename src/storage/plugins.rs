@@ -1,7 +1,6 @@
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::{params, OptionalExtension};
-use std::path::Path;
 use tracing::{error, info, warn};
 
 use crate::runtime::manager::VtxPackageMetadata;
@@ -72,11 +71,9 @@ pub(crate) fn list_resources(
 pub(crate) fn verify_installation(
     pool: &Pool<SqliteConnectionManager>,
     plugin_id: &str,
-    current_path: &Path,
+    current_uri: &str,
 ) -> anyhow::Result<bool> {
     let conn = pool.get()?;
-    let abs_current = std::fs::canonicalize(current_path)?;
-    let abs_current_str = abs_current.to_string_lossy().to_string();
 
     let mut stmt =
         conn.prepare("SELECT file_path FROM sys_plugin_installations WHERE plugin_id = ?1")?;
@@ -84,12 +81,12 @@ pub(crate) fn verify_installation(
 
     match result {
         Some(registered_path) => {
-            if registered_path == abs_current_str {
+            if registered_path == current_uri {
                 Ok(true)
             } else {
                 warn!(
                     "[Install] ID Conflict: '{}' registered at '{}', attempted '{}'",
-                    plugin_id, registered_path, abs_current_str
+                    plugin_id, registered_path, current_uri
                 );
                 Ok(false)
             }
@@ -97,11 +94,11 @@ pub(crate) fn verify_installation(
         None => {
             conn.execute(
                 "INSERT INTO sys_plugin_installations (plugin_id, file_path) VALUES (?1, ?2)",
-                params![plugin_id, abs_current_str],
+                params![plugin_id, current_uri],
             )?;
             info!(
                 "[Install] Locked plugin '{}' to '{}'",
-                plugin_id, abs_current_str
+                plugin_id, current_uri
             );
             Ok(true)
         }

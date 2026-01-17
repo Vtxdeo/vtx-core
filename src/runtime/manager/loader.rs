@@ -5,10 +5,12 @@ use crate::runtime::{
     manager::migration_policy,
 };
 use crate::storage::VideoRegistry;
+use crate::vfs::VfsManager;
 use anyhow::Context;
 use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, error, info};
+use url::Url;
 use wasmtime::{
     component::{Component, Linker},
     Engine,
@@ -35,6 +37,7 @@ pub async fn load_and_migrate(
     linker: &Linker<StreamContext>,
     vtx_path: &Path,
     vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    vfs: Arc<VfsManager>,
     event_bus: Arc<crate::runtime::bus::EventBus>,
 ) -> anyhow::Result<LoadResult> {
     enforce_vtx_only(vtx_path)?;
@@ -45,6 +48,7 @@ pub async fn load_and_migrate(
     let ctx = StreamContext::new_secure(StreamContextConfig {
         registry: registry.clone(),
         vtx_ffmpeg,
+        vfs,
         limiter: wasmtime::StoreLimitsBuilder::new().build(),
         policy: SecurityPolicy::Root,
         plugin_id: None,
@@ -68,7 +72,15 @@ pub async fn load_and_migrate(
         http: capabilities.http.unwrap_or_default(),
     };
 
-    if !registry.verify_installation(&plugin_id, vtx_path)? {
+    let vtx_abs = if vtx_path.is_absolute() {
+        vtx_path.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(vtx_path)
+    };
+    let vtx_uri = Url::from_file_path(&vtx_abs)
+        .map_err(|_| anyhow::anyhow!("Invalid vtx path: {}", vtx_abs.display()))?
+        .to_string();
+    if !registry.verify_installation(&plugin_id, &vtx_uri)? {
         return Err(anyhow::anyhow!(
             "Plugin ID '{}' is already registered with a different path. Installation aborted.",
             plugin_id

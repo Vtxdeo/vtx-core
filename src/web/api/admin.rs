@@ -7,7 +7,6 @@ use axum::{
     Json as AxumJson,
 };
 use serde::Deserialize;
-use std::path::PathBuf;
 use std::sync::Arc;
 
 #[derive(Deserialize)]
@@ -41,7 +40,6 @@ pub struct JobListParams {
 
 /// 扫描目录接口
 ///
-/// 触发文件系统扫描并更新数据库。
 pub async fn scan_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRequest>,
@@ -54,44 +52,39 @@ pub async fn scan_handler(
         }
     };
 
-    let scan_root = match validate_scan_path(&payload.path, &allowed_roots) {
+    let scan_root = match validate_scan_path(&payload.path, &allowed_roots, &state.vfs) {
         Ok(path) => path,
         Err(message) => return AxumJson(errors::admin_bad_request_json(&message)),
     };
 
-    match state.registry.scan_directory(&scan_root.to_string_lossy()) {
-        Ok(new_videos) => AxumJson(success_with_count(new_videos, "scanned_count")),
-        Err(e) => {
+    let registry = state.registry.clone();
+    let vfs = state.vfs.clone();
+    let scan_root = scan_root.clone();
+    let result = tokio::task::spawn_blocking(move || {
+        let handle = tokio::runtime::Handle::current();
+        handle.block_on(registry.scan_directory(&vfs, &scan_root))
+    })
+    .await;
+
+    match result {
+        Ok(Ok(new_videos)) => AxumJson(success_with_count(new_videos, "scanned_count")),
+        Ok(Err(e)) => {
             tracing::error!("[Admin] Scan failed: {}", e);
+            AxumJson(errors::admin_internal_error_json(&e.to_string()))
+        }
+        Err(e) => {
+            tracing::error!("[Admin] Scan join failed: {}", e);
             AxumJson(errors::admin_internal_error_json(&e.to_string()))
         }
     }
 }
 
-fn validate_scan_path(requested: &str, allowed_roots: &[PathBuf]) -> Result<PathBuf, String> {
-    let resolved = std::fs::canonicalize(requested).map_err(|_| "Invalid scan path".to_string())?;
-
-    if !resolved.is_dir() {
-        return Err("Scan path must be a directory".into());
-    }
-
-    let mut has_root = false;
-    for root in allowed_roots {
-        let Ok(root_path) = std::fs::canonicalize(root) else {
-            tracing::warn!("[Admin] Invalid scan root: {:?}", root);
-            continue;
-        };
-        has_root = true;
-        if resolved.starts_with(&root_path) {
-            return Ok(resolved);
-        }
-    }
-
-    if !has_root {
-        return Err("Scan roots not configured".into());
-    }
-
-    Err("Scan path not allowed".into())
+fn validate_scan_path(
+    requested: &str,
+    allowed_roots: &[String],
+    vfs: &crate::vfs::VfsManager,
+) -> Result<String, String> {
+    vfs.match_allowed_prefix(requested, allowed_roots)
 }
 
 /// 列表查询接口
@@ -142,8 +135,11 @@ pub async fn add_scan_root_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRootRequest>,
 ) -> AxumJson<serde_json::Value> {
-    let path = PathBuf::from(payload.path);
-    match state.registry.add_scan_root(&path) {
+    let uri = match state.vfs.ensure_prefix_uri(&payload.path) {
+        Ok(value) => value,
+        Err(e) => return AxumJson(errors::admin_bad_request_json(&e.to_string())),
+    };
+    match state.registry.add_scan_root(&uri) {
         Ok(resolved) => AxumJson(success_json(serde_json::json!({ "path": resolved }))),
         Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }
@@ -153,8 +149,11 @@ pub async fn remove_scan_root_handler(
     State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRootRequest>,
 ) -> AxumJson<serde_json::Value> {
-    let path = PathBuf::from(payload.path);
-    match state.registry.remove_scan_root(&path) {
+    let uri = match state.vfs.ensure_prefix_uri(&payload.path) {
+        Ok(value) => value,
+        Err(e) => return AxumJson(errors::admin_bad_request_json(&e.to_string())),
+    };
+    match state.registry.remove_scan_root(&uri) {
         Ok(resolved) => AxumJson(success_json(serde_json::json!({ "path": resolved }))),
         Err(e) => AxumJson(errors::admin_internal_error_json(&e.to_string())),
     }

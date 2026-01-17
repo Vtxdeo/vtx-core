@@ -1,15 +1,14 @@
 use super::VideoMeta;
+use futures_util::StreamExt;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
-use rayon::prelude::*;
 use rusqlite::params;
 use std::collections::HashSet;
-use std::path::PathBuf;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 use uuid::Uuid;
-use walkdir::WalkDir;
 
-/// 扫描目录并更新视频库
+use crate::vfs::VfsManager;
+
 pub(crate) enum ScanAbort {
     Canceled,
     TimedOut,
@@ -20,19 +19,21 @@ pub(crate) enum ScanOutcome {
     Aborted(ScanAbort),
 }
 
-pub(crate) fn scan_directory(
+pub(crate) async fn scan_directory(
     pool: &Pool<SqliteConnectionManager>,
-    dir_path: &str,
+    vfs: &VfsManager,
+    root_uri: &str,
 ) -> anyhow::Result<Vec<VideoMeta>> {
-    match scan_directory_with_abort(pool, dir_path, || Ok(()))? {
+    match scan_directory_with_abort(pool, vfs, root_uri, || Ok(())).await? {
         ScanOutcome::Completed(videos) => Ok(videos),
         ScanOutcome::Aborted(_) => Ok(Vec::new()),
     }
 }
 
-pub(crate) fn scan_directory_with_abort<F>(
+pub(crate) async fn scan_directory_with_abort<F>(
     pool: &Pool<SqliteConnectionManager>,
-    dir_path: &str,
+    vfs: &VfsManager,
+    root_uri: &str,
     should_continue: F,
 ) -> anyhow::Result<ScanOutcome>
 where
@@ -42,15 +43,9 @@ where
         .get()
         .map_err(|e| anyhow::anyhow!("DB Connection failed: {}", e))?;
 
-    // ???????????????????????????
-    let root_path = std::fs::canonicalize(dir_path).map_err(|e| {
-        error!("[scanner] failed to resolve scan root: {}", e);
-        anyhow::anyhow!("Invalid directory path: {}", e)
-    })?;
+    let root_uri = vfs.ensure_prefix_uri(root_uri)?;
+    info!("[scanner] start scanning directory: {}", root_uri);
 
-    info!("[scanner] start scanning directory: {:?}", root_path);
-
-    // ?????????????????????????????????
     let mut stmt = conn.prepare("SELECT full_path FROM videos")?;
     let existing_paths: HashSet<String> = stmt
         .query_map([], |row| row.get(0))?
@@ -58,70 +53,42 @@ where
         .collect();
 
     drop(stmt);
-    drop(conn); // ???????????????????????????
+    drop(conn);
 
-    // ????????????????????????
-    let new_videos_result: Result<Vec<VideoMeta>, ScanAbort> = WalkDir::new(&root_path)
-        .into_iter()
-        .par_bridge()
-        .filter_map(Result::ok)
-        .filter(|entry| entry.path().is_file())
-        .map(|entry| {
-            should_continue()?;
-            let path = entry.path();
-            let ext = match path.extension() {
-                Some(ext) => ext.to_string_lossy().to_lowercase(),
-                None => return Ok(None),
-            };
-            if !["mp4", "mkv", "mov", "avi", "webm"].contains(&ext.as_str()) {
-                return Ok(None);
-            }
+    let mut new_videos = Vec::new();
+    let mut stream = vfs.list_objects(&root_uri).await?;
 
-            let real_path = match std::fs::canonicalize(path) {
-                Ok(real_path) => real_path,
-                Err(_) => return Ok(None),
-            };
-            let full_path_str = real_path.to_string_lossy().to_string();
+    while let Some(item) = stream.next().await {
+        if let Err(abort) = should_continue() {
+            return Ok(ScanOutcome::Aborted(abort));
+        }
+        let obj = match item {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
 
-            // ?????????????????????
-            if !real_path.starts_with(&root_path) {
-                warn!("[scanner] symlink outside root skipped: {:?}", real_path);
-                return Ok(None);
-            }
+        let ext = extract_extension(&obj.uri);
+        if !matches!(ext.as_deref(), Some("mp4") | Some("mkv") | Some("mov") | Some("avi") | Some("webm")) {
+            continue;
+        }
 
-            if existing_paths.contains(&full_path_str) {
-                return Ok(None);
-            }
+        if existing_paths.contains(&obj.uri) {
+            continue;
+        }
 
-            let filename = match path.file_name() {
-                Some(name) => name.to_string_lossy().to_string(),
-                None => return Ok(None),
-            };
+        let filename = match extract_filename(&obj.uri) {
+            Some(name) => name,
+            None => continue,
+        };
 
-            Ok(Some(VideoMeta {
-                id: Uuid::new_v4().to_string(),
-                filename,
-                full_path: real_path,
-                created_at: "Just Now".to_string(),
-            }))
-        })
-        .try_fold(Vec::new, |mut acc, item| {
-            if let Some(video) = item? {
-                acc.push(video);
-            }
-            Ok(acc)
-        })
-        .try_reduce(Vec::new, |mut acc, other| {
-            acc.extend(other);
-            Ok(acc)
+        new_videos.push(VideoMeta {
+            id: Uuid::new_v4().to_string(),
+            filename,
+            source_uri: obj.uri,
+            created_at: "Just Now".to_string(),
         });
+    }
 
-    let new_videos = match new_videos_result {
-        Ok(videos) => videos,
-        Err(abort) => return Ok(ScanOutcome::Aborted(abort)),
-    };
-
-    // ????????????
     if !new_videos.is_empty() {
         let mut conn = pool.get()?;
         let tx = conn.transaction()?;
@@ -133,17 +100,13 @@ where
             )?;
 
             for video in &new_videos {
-                let path_str = video.full_path.to_string_lossy().to_string();
-                if let Err(e) = stmt.execute(params![&video.id, &video.filename, &path_str]) {
+                if let Err(e) = stmt.execute(params![&video.id, &video.filename, &video.source_uri]) {
                     error!("[scanner] insert failed: {} ({})", video.filename, e);
                 }
             }
         }
         tx.commit()?;
-        info!(
-            "[scanner] scan completed: {} new videos registered",
-            new_videos.len()
-        );
+        info!("[scanner] scan completed: {} new videos registered", new_videos.len());
     }
 
     Ok(ScanOutcome::Completed(new_videos))
@@ -159,7 +122,7 @@ pub(crate) fn list_all(pool: &Pool<SqliteConnectionManager>) -> anyhow::Result<V
         Ok(VideoMeta {
             id: row.get(0)?,
             filename: row.get(1)?,
-            full_path: PathBuf::from(row.get::<_, String>(2)?),
+            source_uri: row.get::<_, String>(2)?,
             created_at: row.get::<_, String>(3)?,
         })
     })?;
@@ -171,19 +134,25 @@ pub(crate) fn list_all(pool: &Pool<SqliteConnectionManager>) -> anyhow::Result<V
     Ok(results)
 }
 
-/// 根据 ID 获取路径
-pub(crate) fn get_path(pool: &Pool<SqliteConnectionManager>, id: &str) -> Option<PathBuf> {
+pub(crate) fn get_uri(pool: &Pool<SqliteConnectionManager>, id: &str) -> Option<String> {
     let conn = pool.get().ok()?;
     let mut stmt = conn
         .prepare_cached("SELECT full_path FROM videos WHERE id = ?1")
         .ok()?;
     let path_str: String = stmt.query_row(params![id], |row| row.get(0)).ok()?;
-    let path = PathBuf::from(path_str);
+    Some(path_str)
+}
 
-    if path.exists() {
-        Some(path)
-    } else {
-        warn!("[Database] File not found on disk: {:?}", path);
-        None
-    }
+fn extract_extension(uri: &str) -> Option<String> {
+    let path = url::Url::parse(uri).ok().map(|u| u.path().to_string()).unwrap_or_else(|| uri.to_string());
+    std::path::Path::new(&path)
+        .extension()
+        .map(|ext| ext.to_string_lossy().to_lowercase())
+}
+
+fn extract_filename(uri: &str) -> Option<String> {
+    let path = url::Url::parse(uri).ok().map(|u| u.path().to_string()).unwrap_or_else(|| uri.to_string());
+    std::path::Path::new(&path)
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
 }

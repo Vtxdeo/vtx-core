@@ -2,6 +2,7 @@ mod common;
 mod config;
 mod runtime;
 mod storage;
+mod vfs;
 mod web;
 
 use axum::{
@@ -24,6 +25,7 @@ use crate::runtime::{
     manager::{PluginManager, PluginManagerConfig},
 };
 use crate::storage::VideoRegistry;
+use crate::vfs::VfsManager;
 use crate::web::{
     api::{admin, plugin, ws},
     middleware::auth::auth_middleware,
@@ -91,6 +93,7 @@ async fn main() -> anyhow::Result<()> {
     api::http_client::add_to_linker(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
+    let vfs = Arc::new(VfsManager::new()?);
 
     // 初始化 vtx-ffmpeg 中间层管理器
     let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(
@@ -106,6 +109,7 @@ async fn main() -> anyhow::Result<()> {
         engine: engine.clone(),
         plugin_dir: settings.plugins.location.clone(),
         registry: registry.clone(),
+        vfs: vfs.clone(),
         linker,
         auth_provider: settings.plugins.auth_provider.clone(),
         vtx_ffmpeg: vtx_ffmpeg_manager.clone(),
@@ -122,12 +126,13 @@ async fn main() -> anyhow::Result<()> {
         registry,
         config: settings.clone(),
         vtx_ffmpeg: vtx_ffmpeg_manager,
+        vfs: vfs.clone(),
         event_bus,
         ipc_outbound: ipc_outbound_tx,
     });
 
     jobs::recover_startup(state.registry.clone(), settings.job_queue.clone()).await;
-    jobs::spawn_workers(state.registry.clone(), settings.job_queue.clone());
+    jobs::spawn_workers(state.registry.clone(), vfs, settings.job_queue.clone());
 
     // 路由定义
     let app = Router::new()

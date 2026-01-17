@@ -51,7 +51,7 @@ pub async fn gateway_handler(
     // 3. 处理响应
     match result {
         Ok((Some(buffer), status_code)) => {
-            StreamProtocolLayer::process(buffer, &headers, status_code).await
+            StreamProtocolLayer::process(buffer, &headers, status_code, state.vfs.clone()).await
         }
         Ok((None, status_code)) => StatusCode::from_u16(status_code)
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)

@@ -3,6 +3,7 @@ use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
 use crate::runtime::host_impl::ffmpeg_policy::validate_ffmpeg_options;
 use std::process::Stdio;
+use url::Url;
 use wasmtime::component::Resource;
 
 #[async_trait::async_trait]
@@ -31,11 +32,17 @@ impl api::ffmpeg::Host for StreamContext {
         let (input_arg, use_stdin_pipe) = if params.input_id == "pipe:0" {
             ("pipe:0".to_string(), true)
         } else {
-            let path = self
+            let uri = self
                 .registry
-                .get_path(&params.input_id)
+                .get_uri(&params.input_id)
                 .ok_or_else(|| format!("Input video ID '{}' not found", params.input_id))?;
-            // 将 PathBuf 转为 String
+            let url = Url::parse(&uri).map_err(|_| "Invalid input URI")?;
+            if url.scheme() != "file" {
+                return Err("ffmpeg input must be a file:// URI".into());
+            }
+            let path = url
+                .to_file_path()
+                .map_err(|_| "Invalid file:// URI")?;
             (path.to_string_lossy().to_string(), false)
         };
 
@@ -85,7 +92,7 @@ impl api::ffmpeg::Host for StreamContext {
 
         let rb = RealBuffer {
             inner: BufferType::Pipe(stdout),
-            path_hint: None,
+            uri_hint: None,
             mime_override: Some("video/mp4".to_string()),
             process_handle: Some(child),
         };

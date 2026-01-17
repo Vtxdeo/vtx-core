@@ -7,7 +7,6 @@ pub mod videos;
 use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use serde::Serialize;
-use std::path::{Path, PathBuf};
 
 /// 视频元数据结�?
 #[derive(Debug, Clone, Serialize)]
@@ -19,7 +18,7 @@ pub struct VideoMeta {
     /// 原始完整路径（用于内部处理，不序列化�?
     #[serde(skip_serializing)]
     #[allow(dead_code)]
-    pub full_path: PathBuf,
+    pub source_uri: String,
     /// 创建时间（格式化字符串）
     pub created_at: String,
 }
@@ -47,19 +46,24 @@ impl VideoRegistry {
     // ===============================
 
     /// 扫描指定目录中的视频文件并写入数据库
-    pub fn scan_directory(&self, dir_path: &str) -> anyhow::Result<Vec<VideoMeta>> {
-        videos::scan_directory(&self.pool, dir_path)
+    pub async fn scan_directory(
+        &self,
+        vfs: &crate::vfs::VfsManager,
+        root_uri: &str,
+    ) -> anyhow::Result<Vec<VideoMeta>> {
+        videos::scan_directory(&self.pool, vfs, root_uri).await
     }
 
-    pub(crate) fn scan_directory_with_abort<F>(
+    pub(crate) async fn scan_directory_with_abort<F>(
         &self,
-        dir_path: &str,
+        vfs: &crate::vfs::VfsManager,
+        root_uri: &str,
         should_continue: F,
     ) -> anyhow::Result<videos::ScanOutcome>
     where
         F: Fn() -> Result<(), videos::ScanAbort> + Send + Sync,
     {
-        videos::scan_directory_with_abort(&self.pool, dir_path, should_continue)
+        videos::scan_directory_with_abort(&self.pool, vfs, root_uri, should_continue).await
     }
 
     /// 查询数据库中所有视频元数据
@@ -68,8 +72,8 @@ impl VideoRegistry {
     }
 
     /// 获取指定视频的实际文件路�?
-    pub fn get_path(&self, id: &str) -> Option<PathBuf> {
-        videos::get_path(&self.pool, id)
+    pub fn get_uri(&self, id: &str) -> Option<String> {
+        videos::get_uri(&self.pool, id)
     }
 
     // ===============================
@@ -104,9 +108,9 @@ impl VideoRegistry {
     pub fn verify_installation(
         &self,
         plugin_id: &str,
-        current_path: &Path,
+        current_uri: &str,
     ) -> anyhow::Result<bool> {
-        plugins::verify_installation(&self.pool, plugin_id, current_path)
+        plugins::verify_installation(&self.pool, plugin_id, current_uri)
     }
 
     /// 释放插件的安装锁�?
@@ -127,16 +131,16 @@ impl VideoRegistry {
         plugins::nuke_plugin(&self.pool, plugin_name)
     }
 
-    pub fn list_scan_roots(&self) -> anyhow::Result<Vec<PathBuf>> {
+    pub fn list_scan_roots(&self) -> anyhow::Result<Vec<String>> {
         scan_roots::list_scan_roots(&self.pool)
     }
 
-    pub fn add_scan_root(&self, path: &PathBuf) -> anyhow::Result<PathBuf> {
-        scan_roots::add_scan_root(&self.pool, path)
+    pub fn add_scan_root(&self, uri: &str) -> anyhow::Result<String> {
+        scan_roots::add_scan_root(&self.pool, uri)
     }
 
-    pub fn remove_scan_root(&self, path: &PathBuf) -> anyhow::Result<PathBuf> {
-        scan_roots::remove_scan_root(&self.pool, path)
+    pub fn remove_scan_root(&self, uri: &str) -> anyhow::Result<String> {
+        scan_roots::remove_scan_root(&self.pool, uri)
     }
 
     // ===============================

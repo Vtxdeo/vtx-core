@@ -18,6 +18,7 @@ use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
+use crate::vfs::VfsManager;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VtxAuthor {
@@ -83,6 +84,7 @@ pub struct PluginManager {
     auth_provider: Option<String>,
     /// VtxFfmpeg 工具链管理器
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub vfs: Arc<VfsManager>,
     max_buffer_read_bytes: u64,
     max_memory_bytes: usize,
     event_bus: Arc<EventBus>,
@@ -95,6 +97,7 @@ pub struct PluginManagerConfig {
     pub linker: Linker<StreamContext>,
     pub auth_provider: Option<String>,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub vfs: Arc<VfsManager>,
     pub max_buffer_read_bytes: u64,
     pub max_memory_bytes: usize,
     pub event_bus: Arc<EventBus>,
@@ -109,6 +112,7 @@ impl PluginManager {
             linker,
             auth_provider,
             vtx_ffmpeg,
+            vfs,
             max_buffer_read_bytes,
             max_memory_bytes,
             event_bus,
@@ -147,6 +151,7 @@ impl PluginManager {
             routes: Arc::new(RwLock::new(Vec::new())),
             auth_provider,
             vtx_ffmpeg,
+            vfs,
             max_buffer_read_bytes,
             max_memory_bytes,
             event_bus,
@@ -217,6 +222,7 @@ impl PluginManager {
             &self.linker,
             path,
             self.vtx_ffmpeg.clone(),
+            self.vfs.clone(),
             self.event_bus.clone(),
         )
         .await?;
@@ -277,6 +283,7 @@ impl PluginManager {
             let engine = self.engine.clone();
             let registry = self.registry.clone();
             let vtx_ffmpeg = self.vtx_ffmpeg.clone();
+            let vfs = self.vfs.clone();
             let max_buffer = self.max_buffer_read_bytes;
             let max_memory = self.max_memory_bytes;
 
@@ -293,6 +300,7 @@ impl PluginManager {
                             engine: engine.clone(),
                             registry: registry.clone(),
                             vtx_ffmpeg: vtx_ffmpeg.clone(),
+                            vfs: vfs.clone(),
                             event_bus: bus.clone(),
                             max_memory_bytes: max_memory,
                             max_buffer_read_bytes: max_buffer,
@@ -469,6 +477,7 @@ impl PluginManager {
         let ctx = StreamContext::new_secure(StreamContextConfig {
             registry: self.registry.clone(),
             vtx_ffmpeg: self.vtx_ffmpeg.clone(),
+            vfs: self.vfs.clone(),
             limiter: limits,
             policy: SecurityPolicy::Restricted,
             plugin_id: Some(runtime.id.clone()),

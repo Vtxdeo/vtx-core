@@ -5,6 +5,7 @@ use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::{api, Plugin};
 use crate::runtime::manager::PluginRuntime;
 use crate::storage::VideoRegistry;
+use crate::vfs::VfsManager;
 use crate::web::state::AppState;
 use std::sync::Arc;
 use wasmtime::Store;
@@ -18,6 +19,7 @@ pub struct EventDispatchContext {
     pub engine: wasmtime::Engine,
     pub registry: VideoRegistry,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub vfs: Arc<VfsManager>,
     pub event_bus: Arc<EventBus>,
     pub max_memory_bytes: usize,
     pub max_buffer_read_bytes: u64,
@@ -68,6 +70,7 @@ impl PluginExecutor {
         let ctx = StreamContext::new_secure(StreamContextConfig {
             registry,
             vtx_ffmpeg,
+            vfs: state.vfs.clone(),
             limiter: limits,
             policy: SecurityPolicy::Plugin,
             plugin_id: Some(plugin_id),
@@ -123,6 +126,7 @@ impl PluginExecutor {
                 engine: state.engine.clone(),
                 registry: state.registry.clone(),
                 vtx_ffmpeg: state.vtx_ffmpeg.clone(),
+                vfs: state.vfs.clone(),
                 event_bus: state.event_bus.clone(),
                 max_memory_bytes: state.config.plugins.max_memory_mb as usize * 1024 * 1024,
                 max_buffer_read_bytes: state.config.plugins.max_buffer_read_mb * 1024 * 1024,
@@ -142,6 +146,7 @@ impl PluginExecutor {
             engine,
             registry,
             vtx_ffmpeg,
+            vfs,
             event_bus,
             max_memory_bytes,
             max_buffer_read_bytes,
@@ -168,6 +173,7 @@ impl PluginExecutor {
         let ctx = StreamContext::new_secure(StreamContextConfig {
             registry,
             vtx_ffmpeg,
+            vfs,
             limiter: limits,
             policy: SecurityPolicy::Plugin,
             plugin_id: Some(plugin_id),
