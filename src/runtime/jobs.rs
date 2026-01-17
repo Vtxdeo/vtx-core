@@ -353,7 +353,9 @@ fn handle_job(
         "noop" => registry
             .complete_job(job_id, r#"{"status":"ok"}"#)
             .map_err(|e| e.to_string()),
-        "scan-directory" => handle_scan_directory(registry, vfs, job_id, &normalized_payload, timeout_secs),
+        "scan-directory" => {
+            handle_scan_directory(registry, vfs, job_id, &normalized_payload, timeout_secs)
+        }
         _ => Err("unsupported job_type".into()),
     }
 }

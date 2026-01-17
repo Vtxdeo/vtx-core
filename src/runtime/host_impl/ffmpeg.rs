@@ -40,9 +40,7 @@ impl api::ffmpeg::Host for StreamContext {
             if url.scheme() != "file" {
                 return Err("ffmpeg input must be a file:// URI".into());
             }
-            let path = url
-                .to_file_path()
-                .map_err(|_| "Invalid file:// URI")?;
+            let path = url.to_file_path().map_err(|_| "Invalid file:// URI")?;
             (path.to_string_lossy().to_string(), false)
         };
 

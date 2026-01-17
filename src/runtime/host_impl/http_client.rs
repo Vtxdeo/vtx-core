@@ -276,7 +276,8 @@ async fn read_buffer_resource(
                     return Err("Request body exceeded max-request-bytes".into());
                 }
             }
-            Ok(ctx.vfs
+            Ok(ctx
+                .vfs
                 .read_range(uri, 0, meta.size)
                 .await
                 .map(|bytes| bytes.to_vec())

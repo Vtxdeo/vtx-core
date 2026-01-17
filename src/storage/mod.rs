@@ -105,11 +105,7 @@ impl VideoRegistry {
     }
 
     /// 验证插件是否已安装，并尝试锁定安装路�?
-    pub fn verify_installation(
-        &self,
-        plugin_id: &str,
-        current_uri: &str,
-    ) -> anyhow::Result<bool> {
+    pub fn verify_installation(&self, plugin_id: &str, current_uri: &str) -> anyhow::Result<bool> {
         plugins::verify_installation(&self.pool, plugin_id, current_uri)
     }
 

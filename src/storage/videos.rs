@@ -68,7 +68,10 @@ where
         };
 
         let ext = extract_extension(&obj.uri);
-        if !matches!(ext.as_deref(), Some("mp4") | Some("mkv") | Some("mov") | Some("avi") | Some("webm")) {
+        if !matches!(
+            ext.as_deref(),
+            Some("mp4") | Some("mkv") | Some("mov") | Some("avi") | Some("webm")
+        ) {
             continue;
         }
 
@@ -100,13 +103,17 @@ where
             )?;
 
             for video in &new_videos {
-                if let Err(e) = stmt.execute(params![&video.id, &video.filename, &video.source_uri]) {
+                if let Err(e) = stmt.execute(params![&video.id, &video.filename, &video.source_uri])
+                {
                     error!("[scanner] insert failed: {} ({})", video.filename, e);
                 }
             }
         }
         tx.commit()?;
-        info!("[scanner] scan completed: {} new videos registered", new_videos.len());
+        info!(
+            "[scanner] scan completed: {} new videos registered",
+            new_videos.len()
+        );
     }
 
     Ok(ScanOutcome::Completed(new_videos))
@@ -144,14 +151,20 @@ pub(crate) fn get_uri(pool: &Pool<SqliteConnectionManager>, id: &str) -> Option<
 }
 
 fn extract_extension(uri: &str) -> Option<String> {
-    let path = url::Url::parse(uri).ok().map(|u| u.path().to_string()).unwrap_or_else(|| uri.to_string());
+    let path = url::Url::parse(uri)
+        .ok()
+        .map(|u| u.path().to_string())
+        .unwrap_or_else(|| uri.to_string());
     std::path::Path::new(&path)
         .extension()
         .map(|ext| ext.to_string_lossy().to_lowercase())
 }
 
 fn extract_filename(uri: &str) -> Option<String> {
-    let path = url::Url::parse(uri).ok().map(|u| u.path().to_string()).unwrap_or_else(|| uri.to_string());
+    let path = url::Url::parse(uri)
+        .ok()
+        .map(|u| u.path().to_string())
+        .unwrap_or_else(|| uri.to_string());
     std::path::Path::new(&path)
         .file_name()
         .map(|name| name.to_string_lossy().to_string())

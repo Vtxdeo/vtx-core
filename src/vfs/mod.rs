@@ -77,7 +77,8 @@ impl VfsManager {
         let requested_norm = self
             .normalize_uri(requested)
             .map_err(|_| "Invalid scan path".to_string())?;
-        let requested_url = Url::parse(&requested_norm).map_err(|_| "Invalid scan path".to_string())?;
+        let requested_url =
+            Url::parse(&requested_norm).map_err(|_| "Invalid scan path".to_string())?;
 
         let mut has_root = false;
         for root in allowed_roots {
@@ -185,7 +186,10 @@ impl VfsManager {
 
         let mapped = stream.map(|item| match item {
             Ok(bytes) => Ok(bytes),
-            Err(err) => Err(std::io::Error::new(std::io::ErrorKind::Other, err.to_string())),
+            Err(err) => Err(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                err.to_string(),
+            )),
         });
         Ok(Box::pin(mapped))
     }
@@ -256,7 +260,11 @@ impl VfsManager {
         Ok(VfsResolved { entry, location })
     }
 
-    fn meta_to_object(&self, entry: &VfsStoreEntry, meta: &ObjectMeta) -> anyhow::Result<VfsObject> {
+    fn meta_to_object(
+        &self,
+        entry: &VfsStoreEntry,
+        meta: &ObjectMeta,
+    ) -> anyhow::Result<VfsObject> {
         let uri = entry.to_uri(&meta.location)?;
         Ok(VfsObject {
             uri,
@@ -275,7 +283,9 @@ impl VfsStoreEntry {
                     .file_root
                     .as_ref()
                     .context("Missing file root for file store")?;
-                let rel = location.as_ref().replace('/', &std::path::MAIN_SEPARATOR.to_string());
+                let rel = location
+                    .as_ref()
+                    .replace('/', &std::path::MAIN_SEPARATOR.to_string());
                 let os_path = root.join(rel);
                 Ok(Url::from_file_path(&os_path)
                     .map_err(|_| anyhow::anyhow!("Invalid file path"))?
