@@ -235,7 +235,7 @@ async fn admin_scan_directory_returns_count() {
         .add_scan_root(&file_uri(scan_root.path()))
         .expect("add scan root");
 
-    let body = serde_json::json!({ "path": scan_root.path() });
+    let body = serde_json::json!({ "path": file_uri(scan_root.path()) });
     let response = app
         .oneshot(
             Request::builder()

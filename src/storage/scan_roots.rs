@@ -2,6 +2,7 @@ use r2d2::Pool;
 use r2d2_sqlite::SqliteConnectionManager;
 use rusqlite::params;
 use tracing::warn;
+use url::Url;
 
 pub(crate) fn list_scan_roots(pool: &Pool<SqliteConnectionManager>) -> anyhow::Result<Vec<String>> {
     let conn = pool.get()?;
@@ -14,6 +15,22 @@ pub(crate) fn add_scan_root(
     pool: &Pool<SqliteConnectionManager>,
     uri: &str,
 ) -> anyhow::Result<String> {
+    if let Ok(url) = Url::parse(uri) {
+        if url.scheme() == "file" {
+            let path = url
+                .to_file_path()
+                .map_err(|_| anyhow::anyhow!("Invalid file URI"))?;
+            let metadata = std::fs::metadata(&path)
+                .map_err(|_| anyhow::anyhow!("Scan root directory not found: {}", path.display()))?;
+            if !metadata.is_dir() {
+                return Err(anyhow::anyhow!(
+                    "Scan root must be a directory: {}",
+                    path.display()
+                ));
+            }
+        }
+    }
+
     let conn = pool.get()?;
     conn.execute(
         "INSERT OR IGNORE INTO sys_scan_roots (path) VALUES (?1)",
