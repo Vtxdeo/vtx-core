@@ -186,10 +186,7 @@ impl VfsManager {
 
         let mapped = stream.map(|item| match item {
             Ok(bytes) => Ok(bytes),
-            Err(err) => Err(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                err.to_string(),
-            )),
+            Err(err) => Err(std::io::Error::other(err.to_string())),
         });
         Ok(Box::pin(mapped))
     }
@@ -285,7 +282,7 @@ impl VfsStoreEntry {
                     .context("Missing file root for file store")?;
                 let rel = location
                     .as_ref()
-                    .replace('/', &std::path::MAIN_SEPARATOR.to_string());
+                    .replace('/', std::path::MAIN_SEPARATOR_STR);
                 let os_path = root.join(rel);
                 Ok(Url::from_file_path(&os_path)
                     .map_err(|_| anyhow::anyhow!("Invalid file path"))?

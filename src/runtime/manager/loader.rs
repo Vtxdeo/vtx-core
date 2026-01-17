@@ -7,7 +7,6 @@ use crate::runtime::{
 use crate::storage::VideoRegistry;
 use crate::vfs::VfsManager;
 use anyhow::Context;
-use std::path::Path;
 use std::sync::Arc;
 use tracing::{debug, error, info};
 use url::Url;
@@ -35,14 +34,14 @@ pub async fn load_and_migrate(
     engine: &Engine,
     registry: &VideoRegistry,
     linker: &Linker<StreamContext>,
-    vtx_path: &Path,
+    vtx_uri: &str,
     vtx_ffmpeg: Arc<VtxFfmpegManager>,
     vfs: Arc<VfsManager>,
     event_bus: Arc<crate::runtime::bus::EventBus>,
 ) -> anyhow::Result<LoadResult> {
-    enforce_vtx_only(vtx_path)?;
+    enforce_vtx_only(vtx_uri)?;
 
-    let (component, vtx_meta) = load_component_from_vtx(engine, vtx_path)?;
+    let (component, vtx_meta) = load_component_from_vtx(engine, &vfs, vtx_uri).await?;
 
     // Root 权限允许迁移
     let ctx = StreamContext::new_secure(StreamContextConfig {
@@ -72,15 +71,7 @@ pub async fn load_and_migrate(
         http: capabilities.http.unwrap_or_default(),
     };
 
-    let vtx_abs = if vtx_path.is_absolute() {
-        vtx_path.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(vtx_path)
-    };
-    let vtx_uri = Url::from_file_path(&vtx_abs)
-        .map_err(|_| anyhow::anyhow!("Invalid vtx path: {}", vtx_abs.display()))?
-        .to_string();
-    if !registry.verify_installation(&plugin_id, &vtx_uri)? {
+    if !registry.verify_installation(&plugin_id, vtx_uri)? {
         return Err(anyhow::anyhow!(
             "Plugin ID '{}' is already registered with a different path. Installation aborted.",
             plugin_id
@@ -192,31 +183,36 @@ pub async fn load_and_migrate(
     })
 }
 
-fn enforce_vtx_only(path: &Path) -> anyhow::Result<()> {
-    let ext_ok = path
+fn enforce_vtx_only(uri: &str) -> anyhow::Result<()> {
+    let url = Url::parse(uri).context("Invalid plugin URI")?;
+    let ext_ok = std::path::Path::new(url.path())
         .extension()
         .and_then(|s| s.to_str())
         .map(|s| s.eq_ignore_ascii_case("vtx"))
         .unwrap_or(false);
 
     if !ext_ok {
-        return Err(anyhow::anyhow!(
-            "Only .vtx plugin is allowed, got: {}",
-            path.display()
-        ));
+        return Err(anyhow::anyhow!("Only .vtx plugin is allowed, got: {}", uri));
     }
     Ok(())
 }
 
-fn load_component_from_vtx(
+async fn load_component_from_vtx(
     engine: &Engine,
-    path: &Path,
+    vfs: &VfsManager,
+    uri: &str,
 ) -> anyhow::Result<(Component, Option<super::VtxPackageMetadata>)> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("failed to read plugin package: {}", path.display()))?;
+    let meta = vfs
+        .head(uri)
+        .await
+        .with_context(|| format!("failed to read plugin package metadata: {}", uri))?;
+    let bytes = vfs
+        .read_range(uri, 0, meta.size)
+        .await
+        .with_context(|| format!("failed to read plugin package: {}", uri))?;
 
     let decoded = vtx_format::decode_with_metadata(&bytes)
-        .with_context(|| format!("invalid vtx package: {}", path.display()))?;
+        .with_context(|| format!("invalid vtx package: {}", uri))?;
 
     let version = decoded.version;
     let vtx_meta = decoded.metadata.and_then(parse_vtx_metadata_json);
@@ -226,8 +222,7 @@ fn load_component_from_vtx(
         .with_context(|| {
             format!(
                 "failed to compile component from vtx (version {}): {}",
-                version,
-                path.display()
+                version, uri
             )
         })
         .map(|c| (c, vtx_meta))

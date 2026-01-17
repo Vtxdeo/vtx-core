@@ -107,7 +107,7 @@ async fn main() -> anyhow::Result<()> {
 
     let plugin_manager = PluginManager::new(PluginManagerConfig {
         engine: engine.clone(),
-        plugin_dir: settings.plugins.location.clone(),
+        plugin_root: settings.plugins.location.clone(),
         registry: registry.clone(),
         vfs: vfs.clone(),
         linker,

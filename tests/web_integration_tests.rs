@@ -15,6 +15,7 @@ use tokio::time::{timeout, Duration};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 use tower::util::ServiceExt;
+use url::Url;
 use uuid::Uuid;
 use vtx_core::{
     common::events::{EventContext, VtxEvent},
@@ -26,6 +27,7 @@ use vtx_core::{
         manager::{PluginManager, PluginManagerConfig},
     },
     storage::VideoRegistry,
+    vfs::VfsManager,
     web::{
         api::{admin, ws},
         state::AppState,
@@ -55,6 +57,10 @@ fn write_ffmpeg_stub(dir: &Path) -> PathBuf {
     path
 }
 
+fn file_uri(path: &Path) -> String {
+    Url::from_file_path(path).expect("file uri").to_string()
+}
+
 async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
@@ -71,12 +77,18 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
 
     let vtx_ffmpeg = Arc::new(VtxFfmpegManager::new(30).expect("vtx_ffmpeg"));
     let event_bus = Arc::new(EventBus::new(8));
+    let vfs = Arc::new(VfsManager::new().expect("vfs"));
     let (ipc_outbound, _ipc_inbound) = mpsc::channel(8);
 
     let plugin_manager = PluginManager::new(PluginManagerConfig {
         engine: engine.clone(),
-        plugin_dir: temp_dir.path().join("plugins"),
+        plugin_root: temp_dir
+            .path()
+            .join("plugins")
+            .to_string_lossy()
+            .to_string(),
         registry: registry.clone(),
+        vfs: vfs.clone(),
         linker,
         auth_provider: None,
         vtx_ffmpeg: vtx_ffmpeg.clone(),
@@ -94,6 +106,7 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
         registry,
         config,
         vtx_ffmpeg,
+        vfs,
         event_bus,
         ipc_outbound,
     });
@@ -219,7 +232,7 @@ async fn admin_scan_directory_returns_count() {
 
     state
         .registry
-        .add_scan_root(&scan_root.path().to_path_buf())
+        .add_scan_root(&file_uri(scan_root.path()))
         .expect("add scan root");
 
     let body = serde_json::json!({ "path": scan_root.path() });
@@ -621,7 +634,7 @@ async fn admin_scan_rejects_path_outside_roots() {
     let allowed_root = tempdir().expect("allowed_root");
     state
         .registry
-        .add_scan_root(&allowed_root.path().to_path_buf())
+        .add_scan_root(&file_uri(allowed_root.path()))
         .expect("add scan root");
 
     let outside_root = tempdir().expect("outside_root");

@@ -4,7 +4,7 @@ pub mod watcher;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{error, info, warn};
 use wasmtime::component::{Component, InstancePre, Linker};
@@ -19,6 +19,9 @@ use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
 use crate::vfs::VfsManager;
+use anyhow::Context;
+use futures_util::StreamExt;
+use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VtxAuthor {
@@ -51,7 +54,7 @@ pub struct PluginRuntime {
     pub instance_pre: InstancePre<StreamContext>,
     #[allow(dead_code)]
     pub component: Component,
-    pub source_path: PathBuf,
+    pub source_uri: String,
 }
 
 /// 插件状态视图
@@ -76,7 +79,7 @@ pub struct PluginPolicy {
 pub struct PluginManager {
     engine: Engine,
     linker: Linker<StreamContext>,
-    pub plugin_dir: PathBuf,
+    pub plugin_root: String,
     registry: VideoRegistry,
     plugins: Arc<RwLock<HashMap<String, Arc<PluginRuntime>>>>,
     routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
@@ -92,7 +95,7 @@ pub struct PluginManager {
 
 pub struct PluginManagerConfig {
     pub engine: Engine,
-    pub plugin_dir: PathBuf,
+    pub plugin_root: String,
     pub registry: VideoRegistry,
     pub linker: Linker<StreamContext>,
     pub auth_provider: Option<String>,
@@ -107,7 +110,7 @@ impl PluginManager {
     pub async fn new(config: PluginManagerConfig) -> anyhow::Result<Self> {
         let PluginManagerConfig {
             engine,
-            mut plugin_dir,
+            plugin_root,
             registry,
             linker,
             auth_provider,
@@ -117,35 +120,28 @@ impl PluginManager {
             max_memory_bytes,
             event_bus,
         } = config;
-        if plugin_dir.is_file() {
-            warn!(
-                "[PluginManager] Configured path '{:?}' is a file, but a directory is expected.",
-                plugin_dir
-            );
-            if let Some(parent) = plugin_dir.parent() {
-                warn!(
-                    "[PluginManager] Automatically adjusting plugin directory to: {:?}",
-                    parent
-                );
-                plugin_dir = parent.to_path_buf();
-            } else {
-                return Err(anyhow::anyhow!("Invalid plugin directory path"));
-            }
-        }
 
+        let plugin_root = normalize_plugin_root(&vfs, &plugin_root)?;
         info!(
-            "[PluginManager] Initializing plugin manager at: {:?}",
-            plugin_dir
+            "[PluginManager] Initializing plugin manager at: {}",
+            plugin_root
         );
 
-        if !plugin_dir.exists() {
-            std::fs::create_dir_all(&plugin_dir)?;
+        if let Ok(url) = Url::parse(&plugin_root) {
+            if url.scheme() == "file" {
+                let path = url
+                    .to_file_path()
+                    .map_err(|_| anyhow::anyhow!("Invalid plugin root URI"))?;
+                if !path.exists() {
+                    std::fs::create_dir_all(&path)?;
+                }
+            }
         }
 
         let manager = Self {
             engine: engine.clone(),
             linker,
-            plugin_dir: plugin_dir.clone(),
+            plugin_root: plugin_root.clone(),
             registry,
             plugins: Arc::new(RwLock::new(HashMap::new())),
             routes: Arc::new(RwLock::new(Vec::new())),
@@ -182,23 +178,24 @@ impl PluginManager {
     }
 
     async fn load_all_plugins(&self) -> anyhow::Result<()> {
-        info!("[PluginManager] Scanning plugins in: {:?}", self.plugin_dir);
-        let entries = std::fs::read_dir(&self.plugin_dir).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to read plugin directory '{:?}': {}",
-                self.plugin_dir,
-                e
-            )
-        })?;
-
+        info!("[PluginManager] Scanning plugins in: {}", self.plugin_root);
+        let mut entries = self.vfs.list_objects(&self.plugin_root).await?;
         let mut loaded_count = 0;
+        let mut errors = 0usize;
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "vtx") {
-                match self.load_one(&path).await {
-                    Ok(_) => loaded_count += 1,
-                    Err(e) => error!("[PluginManager] Failed to load {}: {}", path.display(), e),
+        while let Some(item) = entries.next().await {
+            match item {
+                Ok(obj) => {
+                    if is_vtx_uri(&obj.uri) {
+                        match self.load_one(&obj.uri).await {
+                            Ok(_) => loaded_count += 1,
+                            Err(e) => error!("[PluginManager] Failed to load {}: {}", obj.uri, e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    errors += 1;
+                    error!("[PluginManager] Failed to list plugin object: {}", e);
                 }
             }
         }
@@ -212,15 +209,24 @@ impl PluginManager {
             );
         }
 
+        if errors > 0 {
+            return Err(anyhow::anyhow!(
+                "Failed to list {} plugin objects under {}",
+                errors,
+                self.plugin_root
+            ));
+        }
+
         Ok(())
     }
 
-    pub async fn load_one(&self, path: &Path) -> anyhow::Result<()> {
+    pub async fn load_one(&self, uri: &str) -> anyhow::Result<()> {
+        let uri = self.vfs.normalize_uri(uri)?;
         let load_result = loader::load_and_migrate(
             &self.engine,
             &self.registry,
             &self.linker,
-            path,
+            &uri,
             self.vtx_ffmpeg.clone(),
             self.vfs.clone(),
             self.event_bus.clone(),
@@ -235,7 +241,7 @@ impl PluginManager {
             vtx_meta: load_result.vtx_meta.clone(),
             instance_pre,
             component: load_result.component,
-            source_path: path.to_path_buf(),
+            source_uri: uri,
         });
 
         self.register_plugin(runtime)
@@ -333,20 +339,19 @@ impl PluginManager {
         None
     }
 
-    pub fn uninstall_by_path(&self, path: &Path) {
+    pub fn uninstall_by_uri(&self, uri: &str) {
         let target_id = {
             let plugins = self.plugins.read().unwrap();
             plugins
                 .values()
-                .find(|p| p.source_path == path)
+                .find(|p| p.source_uri == uri)
                 .map(|p| p.id.clone())
         };
 
         if let Some(id) = target_id {
             info!(
                 "[Watcher] Detected removal of '{}', uninstalling plugin '{}'...",
-                path.display(),
-                id
+                uri, id
             );
             if let Err(e) = self.uninstall(&id, true) {
                 error!("[Watcher] Failed to uninstall plugin '{}': {}", id, e);
@@ -405,7 +410,7 @@ impl PluginManager {
                 name: p.manifest.name.clone(),
                 version: p.manifest.version.clone(),
                 entrypoint: p.manifest.entrypoint.clone(),
-                source_path: p.source_path.to_string_lossy().to_string(),
+                source_path: p.source_uri.clone(),
                 vtx_meta: p.vtx_meta.clone(),
             })
             .collect()
@@ -509,4 +514,54 @@ impl PluginManager {
                 500u16
             })?
     }
+}
+
+fn normalize_plugin_root(vfs: &VfsManager, raw: &str) -> anyhow::Result<String> {
+    if raw.contains("://") {
+        let mut url = Url::parse(raw).context("Invalid plugin root URI")?;
+        if is_vtx_path(url.path()) {
+            if let Some(parent) = std::path::Path::new(url.path()).parent() {
+                let parent = parent.to_string_lossy().replace('\\', "/");
+                url.set_path(&parent);
+            }
+        }
+        return vfs.ensure_prefix_uri(url.as_str());
+    }
+
+    let mut root_path = PathBuf::from(raw);
+    if root_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("vtx"))
+        .unwrap_or(false)
+    {
+        if let Some(parent) = root_path.parent() {
+            root_path = parent.to_path_buf();
+        }
+    }
+
+    let root_path = if root_path.is_absolute() {
+        root_path
+    } else {
+        std::env::current_dir()?.join(root_path)
+    };
+    let uri = Url::from_file_path(&root_path)
+        .map_err(|_| anyhow::anyhow!("Invalid plugin root path: {}", root_path.display()))?
+        .to_string();
+    vfs.ensure_prefix_uri(&uri)
+}
+
+fn is_vtx_uri(uri: &str) -> bool {
+    let Ok(url) = Url::parse(uri) else {
+        return false;
+    };
+    is_vtx_path(url.path())
+}
+
+fn is_vtx_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("vtx"))
+        .unwrap_or(false)
 }
