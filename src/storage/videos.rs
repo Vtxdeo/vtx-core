@@ -151,21 +151,37 @@ pub(crate) fn get_uri(pool: &Pool<SqliteConnectionManager>, id: &str) -> Option<
 }
 
 fn extract_extension(uri: &str) -> Option<String> {
-    let path = url::Url::parse(uri)
-        .ok()
-        .map(|u| u.path().to_string())
-        .unwrap_or_else(|| uri.to_string());
-    std::path::Path::new(&path)
+    if let Ok(url) = url::Url::parse(uri) {
+        if url.scheme() == "file" {
+            if let Ok(path) = url.to_file_path() {
+                return path
+                    .extension()
+                    .map(|ext| ext.to_string_lossy().to_lowercase());
+            }
+        }
+        return std::path::Path::new(url.path())
+            .extension()
+            .map(|ext| ext.to_string_lossy().to_lowercase());
+    }
+    std::path::Path::new(uri)
         .extension()
         .map(|ext| ext.to_string_lossy().to_lowercase())
 }
 
 fn extract_filename(uri: &str) -> Option<String> {
-    let path = url::Url::parse(uri)
-        .ok()
-        .map(|u| u.path().to_string())
-        .unwrap_or_else(|| uri.to_string());
-    std::path::Path::new(&path)
+    if let Ok(url) = url::Url::parse(uri) {
+        if url.scheme() == "file" {
+            if let Ok(path) = url.to_file_path() {
+                return path
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string());
+            }
+        }
+        return std::path::Path::new(url.path())
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string());
+    }
+    std::path::Path::new(uri)
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
 }
