@@ -21,7 +21,9 @@ async fn scan_directory_registers_new_videos() {
     std::fs::write(&video2, "x").expect("write");
     std::fs::write(&not_video, "x").expect("write");
 
-    let root_uri = url::Url::from_file_path(&root).unwrap().to_string();
+    let root_uri = url::Url::from_directory_path(&root)
+        .expect("root uri")
+        .to_string();
     let new_videos = registry
         .scan_directory(&vfs, &root_uri)
         .await
