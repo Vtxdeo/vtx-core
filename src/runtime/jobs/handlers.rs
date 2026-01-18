@@ -1,3 +1,4 @@
+use crate::common::json_guard::check_json_limits;
 use crate::runtime::job_registry;
 use crate::storage::{
     videos::{ScanAbort, ScanOutcome},
@@ -27,6 +28,12 @@ pub(crate) fn handle_job(
     payload_version: i64,
     timeout_secs: u64,
 ) -> Result<(), String> {
+    const MAX_JOB_PAYLOAD_BYTES: usize = 256 * 1024;
+    const MAX_JOB_JSON_DEPTH: usize = 20;
+
+    check_json_limits(payload, MAX_JOB_PAYLOAD_BYTES, MAX_JOB_JSON_DEPTH)
+        .map_err(|e| format!("Invalid payload: {}", e))?;
+
     let payload_value: serde_json::Value =
         serde_json::from_str(payload).map_err(|e| format!("Invalid payload: {}", e))?;
     let (normalized_payload, _) =
