@@ -1,13 +1,12 @@
 use std::path::Path;
 
 const FFMPEG_VIDEO_EXTENSIONS: &[&str] = &[
-    "3g2", "3gp", "3gp2", "3gpp", "3gpp2", "aaf", "amv", "asf", "asx", "avi", "avs",
-    "bik", "bk2", "drc", "dv", "dif", "dvr-ms", "f4v", "f4p", "f4b", "flv", "fli", "flc",
-    "gxf", "ivf", "m1v", "m2v", "m2p", "m2t", "m2ts", "mts", "m4v", "mj2", "mjpeg", "mjpg",
-    "mkv", "mk3d", "mks", "mov", "mp4", "mpeg", "mpg", "mpe", "mpv", "mxf", "nsv", "nut",
-    "ogm", "ogv", "qt", "rm", "rmvb", "roq", "smk", "swf", "ts", "vob", "webm", "wmv",
-    "wtv", "y4m", "yuv", "h264", "264", "h265", "265", "hevc", "av1", "vp8", "vp9", "vc1",
-    "r3d", "ism", "ismv",
+    "3g2", "3gp", "3gp2", "3gpp", "3gpp2", "aaf", "amv", "asf", "asx", "avi", "avs", "bik", "bk2",
+    "drc", "dv", "dif", "dvr-ms", "f4v", "f4p", "f4b", "flv", "fli", "flc", "gxf", "ivf", "m1v",
+    "m2v", "m2p", "m2t", "m2ts", "mts", "m4v", "mj2", "mjpeg", "mjpg", "mkv", "mk3d", "mks", "mov",
+    "mp4", "mpeg", "mpg", "mpe", "mpv", "mxf", "nsv", "nut", "ogm", "ogv", "qt", "rm", "rmvb",
+    "roq", "smk", "swf", "ts", "vob", "webm", "wmv", "wtv", "y4m", "yuv", "h264", "264", "h265",
+    "265", "hevc", "av1", "vp8", "vp9", "vc1", "r3d", "ism", "ismv",
 ];
 
 pub fn content_type_for_path(path: &str) -> &'static str {

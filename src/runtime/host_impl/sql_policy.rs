@@ -1,34 +1,33 @@
 use crate::runtime::context::{SecurityPolicy, StreamContext};
-use sqlparser::ast::{
-    FromTable, ObjectName, Query, SetExpr, Statement, TableFactor, TableWithJoins,
-};
-use sqlparser::dialect::SQLiteDialect;
-use sqlparser::parser::Parser;
+use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+use rusqlite::Connection;
 use std::collections::HashSet;
+use std::sync::Arc;
 
-pub fn enforce_sql_policy(
+pub struct AuthorizerGuard<'a> {
+    conn: &'a Connection,
+    active: bool,
+}
+
+impl Drop for AuthorizerGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            self.conn
+                .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        }
+    }
+}
+
+pub fn enforce_sql_policy<'a>(
     ctx: &StreamContext,
-    statement: &str,
-    stmt: &rusqlite::Statement<'_>,
-) -> Result<(), String> {
+    conn: &'a Connection,
+) -> Result<AuthorizerGuard<'a>, String> {
     if ctx.policy == SecurityPolicy::Root {
-        return Ok(());
-    }
-
-    let dialect = SQLiteDialect {};
-    let parsed =
-        Parser::parse_sql(&dialect, statement).map_err(|_| "Permission Denied".to_string())?;
-    if parsed.len() != 1 {
-        return Err("Permission Denied".into());
-    }
-    let ast = &parsed[0];
-    if !is_allowed_statement(ast) {
-        return Err("Permission Denied".into());
-    }
-
-    let is_readonly = stmt.readonly();
-    if ctx.policy == SecurityPolicy::Restricted && !is_readonly {
-        return Err("Permission Denied".into());
+        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        return Ok(AuthorizerGuard {
+            conn,
+            active: false,
+        });
     }
 
     let plugin_id = ctx
@@ -45,142 +44,76 @@ pub fn enforce_sql_policy(
         .map(|t| t.to_ascii_lowercase())
         .collect();
 
-    let mut used_tables = Vec::new();
-    collect_tables_from_statement(ast, &mut used_tables)?;
-    if !is_readonly && used_tables.is_empty() {
-        return Err("Permission Denied".into());
-    }
+    let allow_write = match ctx.policy {
+        SecurityPolicy::Restricted => false,
+        SecurityPolicy::Plugin => ctx.permissions.contains("sql:write"),
+        SecurityPolicy::Root => true,
+    };
 
-    for table in used_tables {
-        let name = table.to_ascii_lowercase();
-        if name.starts_with("sys_") || name.contains('.') {
-            return Err("Permission Denied".into());
-        }
-        if !allowed_set.contains(&name) {
-            return Err("Permission Denied".into());
-        }
-    }
+    let config = Arc::new(SqlAuthConfig {
+        allow_write,
+        allowed_tables: allowed_set,
+    });
 
-    Ok(())
+    let hook_config = Arc::clone(&config);
+    conn.authorizer(Some(move |auth_ctx: AuthContext<'_>| {
+        authorize_action(auth_ctx, &hook_config)
+    }));
+
+    Ok(AuthorizerGuard { conn, active: true })
 }
 
-fn is_allowed_statement(stmt: &Statement) -> bool {
-    matches!(
-        stmt,
-        Statement::Query(_)
-            | Statement::Insert { .. }
-            | Statement::Update { .. }
-            | Statement::Delete { .. }
-    )
+struct SqlAuthConfig {
+    allow_write: bool,
+    allowed_tables: HashSet<String>,
 }
 
-fn collect_tables_from_statement(stmt: &Statement, out: &mut Vec<String>) -> Result<(), String> {
-    match stmt {
-        Statement::Query(query) => collect_tables_from_query(query, out),
-        Statement::Insert {
-            table_name, source, ..
-        } => {
-            out.push(object_name_to_string(table_name)?);
-            if let Some(source) = source {
-                collect_tables_from_query(source, out)?;
-            }
-            Ok(())
+fn authorize_action(ctx: AuthContext<'_>, config: &SqlAuthConfig) -> Authorization {
+    match ctx.action {
+        AuthAction::Read { table_name, .. } => {
+            authorize_table(table_name, ctx.database_name, config)
         }
-        Statement::Update { table, from, .. } => {
-            collect_tables_from_table_with_joins(table, out)?;
-            if let Some(from) = from {
-                collect_tables_from_table_with_joins(from, out)?;
-            }
-            Ok(())
-        }
-        Statement::Delete {
-            tables,
-            from,
-            using,
-            ..
-        } => {
-            for table in tables {
-                out.push(object_name_to_string(table)?);
-            }
-            match from {
-                FromTable::WithFromKeyword(from) | FromTable::WithoutKeyword(from) => {
-                    for table in from {
-                        collect_tables_from_table_with_joins(table, out)?;
-                    }
-                }
-            }
-            if let Some(using) = using {
-                for table in using {
-                    collect_tables_from_table_with_joins(table, out)?;
-                }
-            }
-            Ok(())
-        }
-        _ => Err("Permission Denied".into()),
+        AuthAction::Insert { table_name } => authorize_write_table(table_name, ctx, config),
+        AuthAction::Update { table_name, .. } => authorize_write_table(table_name, ctx, config),
+        AuthAction::Delete { table_name } => authorize_write_table(table_name, ctx, config),
+        AuthAction::Select => Authorization::Allow,
+        AuthAction::Function { .. } => Authorization::Allow,
+        AuthAction::Recursive => Authorization::Allow,
+        AuthAction::Transaction { .. } | AuthAction::Savepoint { .. } => Authorization::Deny,
+        _ => Authorization::Deny,
     }
 }
 
-fn collect_tables_from_query(query: &Query, out: &mut Vec<String>) -> Result<(), String> {
-    if let Some(with) = &query.with {
-        for cte in &with.cte_tables {
-            collect_tables_from_query(&cte.query, out)?;
-        }
+fn authorize_write_table(
+    table_name: &str,
+    ctx: AuthContext<'_>,
+    config: &SqlAuthConfig,
+) -> Authorization {
+    if !config.allow_write {
+        return Authorization::Deny;
     }
-    collect_tables_from_setexpr(&query.body, out)
+    authorize_table(table_name, ctx.database_name, config)
 }
 
-fn collect_tables_from_setexpr(expr: &SetExpr, out: &mut Vec<String>) -> Result<(), String> {
-    match expr {
-        SetExpr::Select(select) => {
-            for table in &select.from {
-                collect_tables_from_table_with_joins(table, out)?;
-            }
-            Ok(())
-        }
-        SetExpr::SetOperation { left, right, .. } => {
-            collect_tables_from_setexpr(left, out)?;
-            collect_tables_from_setexpr(right, out)
-        }
-        SetExpr::Query(query) => collect_tables_from_query(query, out),
-        SetExpr::Values(_) => Ok(()),
-        _ => Err("Permission Denied".into()),
+fn authorize_table(
+    table_name: &str,
+    database_name: Option<&str>,
+    config: &SqlAuthConfig,
+) -> Authorization {
+    if !is_allowed_database(database_name) {
+        return Authorization::Deny;
     }
+
+    let name = table_name.to_ascii_lowercase();
+    if name.starts_with("sys_") || name.contains('.') {
+        return Authorization::Deny;
+    }
+    if !config.allowed_tables.contains(&name) {
+        return Authorization::Deny;
+    }
+    Authorization::Allow
 }
 
-fn collect_tables_from_table_with_joins(
-    table: &TableWithJoins,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
-    collect_tables_from_table_factor(&table.relation, out)?;
-    for join in &table.joins {
-        collect_tables_from_table_factor(&join.relation, out)?;
-    }
-    Ok(())
-}
-
-fn collect_tables_from_table_factor(
-    table: &TableFactor,
-    out: &mut Vec<String>,
-) -> Result<(), String> {
-    match table {
-        TableFactor::Table { name, .. } => {
-            out.push(object_name_to_string(name)?);
-            Ok(())
-        }
-        TableFactor::Derived { subquery, .. } => collect_tables_from_query(subquery, out),
-        TableFactor::NestedJoin {
-            table_with_joins, ..
-        } => collect_tables_from_table_with_joins(table_with_joins, out),
-        _ => Err("Permission Denied".into()),
-    }
-}
-
-fn object_name_to_string(name: &ObjectName) -> Result<String, String> {
-    if name.0.is_empty() {
-        return Err("Permission Denied".into());
-    }
-    if name.0.len() > 1 {
-        return Err("Permission Denied".into());
-    }
-    Ok(name.0[0].value.clone())
+fn is_allowed_database(database_name: Option<&str>) -> bool {
+    matches!(database_name, None | Some("main") | Some("temp"))
 }

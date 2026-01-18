@@ -11,7 +11,7 @@ tower-http = { version = "0.6.8", features = ["trace", "cors", "catch-panic"] }
 wasmtime = { version = "40.0.2", features = ["component-model"] }
 wasmtime-wasi = "40.0.2"
 
-rusqlite = { version = "0.37", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled", "hooks"] }
 r2d2 = "0.8"
 r2d2_sqlite = "0.31.0"
 rusqlite_migration = "2.3.0"
@@ -30,7 +30,6 @@ config = "0.14"
 vtx-format = "0.1.6"
 vtx-protocol = "3.6.0"
 futures-util = "0.3.31"
-sqlparser = "0.45"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 url = "2"
 bytes = "1"
