@@ -296,8 +296,8 @@ async fn admin_jobs_flow() {
             Router::new()
                 .route("/jobs", post(admin::submit_job_handler))
                 .route("/jobs", get(admin::list_jobs_handler))
-                .route("/jobs/:id", get(admin::get_job_handler))
-                .route("/jobs/:id/cancel", post(admin::cancel_job_handler))
+                .route("/jobs/{id}", get(admin::get_job_handler))
+                .route("/jobs/{id}/cancel", post(admin::cancel_job_handler))
                 .layer(axum::Extension(user)),
         )
         .with_state(state);
@@ -387,7 +387,7 @@ async fn admin_jobs_not_found_returns_error_code() {
         .nest(
             "/admin",
             Router::new()
-                .route("/jobs/:id", get(admin::get_job_handler))
+                .route("/jobs/{id}", get(admin::get_job_handler))
                 .layer(axum::Extension(user)),
         )
         .with_state(state);
@@ -600,7 +600,7 @@ async fn admin_cancel_missing_job_returns_not_found() {
     let app = Router::new()
         .nest(
             "/admin",
-            Router::new().route("/jobs/:id/cancel", post(admin::cancel_job_handler)),
+            Router::new().route("/jobs/{id}/cancel", post(admin::cancel_job_handler)),
         )
         .with_state(state);
 

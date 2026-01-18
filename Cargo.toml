@@ -6,7 +6,6 @@ edition = "2021"
 [dependencies]
 axum = { version = "0.8.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
-tower = { version = "0.5.3", features = ["util"] }
 tower-http = { version = "0.6.8", features = ["trace", "cors", "catch-panic"] }
 
 wasmtime = { version = "40.0.2", features = ["component-model"] }
@@ -22,8 +21,6 @@ serde_json = "1.0"
 anyhow = "1.0"
 uuid = { version = "1", features = ["v4"] }
 tokio-util = { version = "0.7", features = ["io"] }
-regex = "1.10"
-mime_guess = "2.0"
 
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -33,7 +30,6 @@ config = "0.14"
 vtx-format = "0.1.6"
 vtx-protocol = "3.6.0"
 futures-util = "0.3.31"
-async-trait = "0.1"
 sqlparser = "0.45"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 url = "2"
@@ -48,3 +44,4 @@ vtx-protocol = "3.6.0"
 http-body-util = "0.1"
 tokio-tungstenite = "0.21"
 tempfile = "3"
+tower = { version = "0.5.3", features = ["util"] }

@@ -136,15 +136,15 @@ async fn main() -> anyhow::Result<()> {
                 .route("/plugin", delete(admin::uninstall_handler))
                 .route("/jobs", post(admin::submit_job_handler))
                 .route("/jobs", get(admin::list_jobs_handler))
-                .route("/jobs/:id", get(admin::get_job_handler))
-                .route("/jobs/:id/cancel", post(admin::cancel_job_handler))
+                .route("/jobs/{id}", get(admin::get_job_handler))
+                .route("/jobs/{id}/cancel", post(admin::cancel_job_handler))
                 .route("/ws/events", get(ws::ws_handler))
                 .layer(axum::middleware::from_fn_with_state(
                     state.clone(),
                     auth_middleware,
                 )),
         )
-        .route("/*path", any(plugin::gateway_handler))
+        .route("/{*path}", any(plugin::gateway_handler))
         .with_state(state)
         .layer(CorsLayer::permissive())
         .layer(CatchPanicLayer::new())

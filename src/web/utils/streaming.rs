@@ -13,6 +13,7 @@ use url::Url;
 
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::vtx_vfs::VtxVfsManager;
+use crate::web::utils::mime::content_type_for_path;
 
 struct ProcessStream {
     stream: ReaderStream<ChildStdout>,
@@ -106,9 +107,7 @@ impl StreamProtocolLayer {
 
         let content_type = if let Some(hint) = uri_hint.as_ref() {
             let path = extract_path_for_mime(hint);
-            mime_guess::from_path(&path)
-                .first_raw()
-                .unwrap_or("video/mp4")
+            content_type_for_path(&path)
         } else {
             "video/mp4"
         };
