@@ -83,7 +83,22 @@ jobs:
           shared-key: v1
           cache-directories: |
             ~/.cache/sccache
+      - name: Integration tests (Windows debug)
+        if: runner.os == 'Windows'
+        env:
+          VTX_DEBUG_SCAN: "1"
+        run: >
+          cargo test
+          --test database_tests
+          --test job_registry_tests
+          --test jobs_tests
+          --test plugins_tests
+          --test scan_roots_tests
+          --test videos_tests
+          --test web_integration_tests
+          -- --nocapture
       - name: Integration tests
+        if: runner.os != 'Windows'
         run: >
           cargo test
           --test database_tests
