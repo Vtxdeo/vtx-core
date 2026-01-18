@@ -172,13 +172,7 @@ pub async fn load_and_migrate(
 
 fn enforce_vtx_only(uri: &str) -> anyhow::Result<()> {
     let url = Url::parse(uri).context("Invalid plugin URI")?;
-    let ext_ok = std::path::Path::new(url.path())
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.eq_ignore_ascii_case("vtx"))
-        .unwrap_or(false);
-
-    if !ext_ok {
+    if !super::is_vtx_path(url.path()) {
         return Err(anyhow::anyhow!("Only .vtx plugin is allowed, got: {}", uri));
     }
     Ok(())

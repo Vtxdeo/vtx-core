@@ -4,9 +4,7 @@ use tokio::runtime::Handle;
 use tracing::{error, info};
 
 use futures_util::StreamExt;
-use url::Url;
-
-use super::PluginManager;
+use super::{is_vtx_uri, PluginManager};
 
 /// Starts a polling watcher that scans the VFS plugin root on an interval.
 pub fn spawn_watcher(manager: PluginManager, handle: Handle) {
@@ -84,15 +82,4 @@ async fn scan_once(
     }
 
     Ok(())
-}
-
-fn is_vtx_uri(uri: &str) -> bool {
-    let Ok(url) = Url::parse(uri) else {
-        return false;
-    };
-    std::path::Path::new(url.path())
-        .extension()
-        .and_then(|s| s.to_str())
-        .map(|s| s.eq_ignore_ascii_case("vtx"))
-        .unwrap_or(false)
 }
