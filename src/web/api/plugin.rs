@@ -1,4 +1,4 @@
-use crate::runtime::executor::PluginExecutor;
+use crate::runtime::executor::VtxPluginExecutor;
 use crate::web::{state::AppState, utils::errors, utils::streaming::StreamProtocolLayer};
 use axum::{
     extract::State,
@@ -38,7 +38,7 @@ pub async fn gateway_handler(
     };
 
     // 2. 执行插件
-    let result = PluginExecutor::execute_runtime(
+    let result = VtxPluginExecutor::execute_runtime(
         &state,
         plugin_runtime,
         sub_path,

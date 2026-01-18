@@ -10,7 +10,7 @@ use crate::web::state::AppState;
 use std::sync::Arc;
 use wasmtime::Store;
 
-pub struct PluginExecutor;
+pub struct VtxPluginExecutor;
 
 pub struct EventDispatchContext {
     pub engine: wasmtime::Engine,
@@ -22,75 +22,74 @@ pub struct EventDispatchContext {
     pub max_buffer_read_bytes: u64,
 }
 
-impl PluginExecutor {
-    pub async fn execute_runtime(
-        state: &Arc<AppState>,
-        runtime: Arc<PluginRuntime>,
-        sub_path: String,
-        method: String,
-        query: String,
-        current_user: Option<CurrentUser>,
-    ) -> Result<(Option<RealBuffer>, u16), String> {
-        let engine = state.engine.clone();
-        let registry = state.registry.clone();
-
-        let vtx_ffmpeg = state.vtx_ffmpeg.clone();
-
-        let instance_pre = runtime.instance_pre.clone();
-        let plugin_id = runtime.id.clone();
-
-        let memory_limit_bytes = state.config.plugins.max_memory_mb as usize * 1024 * 1024;
-        let max_buffer_read_bytes = state.config.plugins.max_buffer_read_mb * 1024 * 1024;
-
-        let limits = wasmtime::StoreLimitsBuilder::new()
-            .memory_size(memory_limit_bytes)
+impl VtxPluginExecutor {
+    fn build_limits(max_memory_bytes: usize) -> wasmtime::StoreLimits {
+        wasmtime::StoreLimitsBuilder::new()
+            .memory_size(max_memory_bytes)
             .instances(5)
             .tables(1000)
-            .build();
+            .build()
+    }
 
+    fn build_context(
+        state: &AppState,
+        runtime: &PluginRuntime,
+        current_user: Option<CurrentUser>,
+    ) -> StreamContext {
         let permissions = runtime
             .policy
             .permissions
             .iter()
             .cloned()
             .collect::<std::collections::HashSet<_>>();
+        let memory_limit_bytes = state.config.plugins.max_memory_mb as usize * 1024 * 1024;
+        let max_buffer_read_bytes = state.config.plugins.max_buffer_read_mb * 1024 * 1024;
+        let limits = Self::build_limits(memory_limit_bytes);
 
-        let ctx = StreamContext::new_secure(StreamContextConfig {
-            registry,
-            vtx_ffmpeg,
+        StreamContext::new_secure(StreamContextConfig {
+            registry: state.registry.clone(),
+            vtx_ffmpeg: state.vtx_ffmpeg.clone(),
             vfs: state.vfs.clone(),
             limiter: limits,
             policy: SecurityPolicy::Plugin,
-            plugin_id: Some(plugin_id),
+            plugin_id: Some(runtime.id.clone()),
             max_buffer_read_bytes,
             current_user,
             event_bus: state.event_bus.clone(),
             permissions,
             http_allowlist: runtime.policy.http.clone(),
-        });
+        })
+    }
 
-        let mut store = Store::new(&engine, ctx);
+    fn build_store(engine: &wasmtime::Engine, ctx: StreamContext) -> Store<StreamContext> {
+        let mut store = Store::new(engine, ctx);
         store.limiter(|s| &mut s.limiter);
+        store
+    }
 
+    async fn instantiate_plugin(
+        store: &mut Store<StreamContext>,
+        instance_pre: &wasmtime::component::InstancePre<StreamContext>,
+    ) -> Result<Plugin, String> {
         let instance = instance_pre
-            .instantiate_async(&mut store)
+            .instantiate_async(&mut *store)
             .await
             .map_err(|e| format!("Fast instantiation failed: {}", e))?;
+        Plugin::new(store, &instance).map_err(|e| format!("Plugin binding failed: {}", e))
+    }
 
-        let plugin = Plugin::new(&mut store, &instance)
-            .map_err(|e| format!("Plugin binding failed: {}", e))?;
-
-        let req = api::types::HttpRequest {
+    fn build_request(method: String, sub_path: String, query: String) -> api::types::HttpRequest {
+        api::types::HttpRequest {
             method,
             path: sub_path,
             query,
-        };
+        }
+    }
 
-        let response = plugin
-            .call_handle(&mut store, &req)
-            .await
-            .map_err(|e| format!("Execution failed: {}", e))?;
-
+    fn resolve_response(
+        store: &mut Store<StreamContext>,
+        response: api::types::HttpResponse,
+    ) -> Result<(Option<RealBuffer>, u16), String> {
         if let Some(resource_handle) = response.body {
             let buffer = store
                 .data_mut()
@@ -101,6 +100,27 @@ impl PluginExecutor {
         } else {
             Ok((None, response.status))
         }
+    }
+
+    pub async fn execute_runtime(
+        state: &Arc<AppState>,
+        runtime: Arc<PluginRuntime>,
+        sub_path: String,
+        method: String,
+        query: String,
+        current_user: Option<CurrentUser>,
+    ) -> Result<(Option<RealBuffer>, u16), String> {
+        let ctx = Self::build_context(state.as_ref(), runtime.as_ref(), current_user);
+        let mut store = Self::build_store(&state.engine, ctx);
+        let plugin = Self::instantiate_plugin(&mut store, &runtime.instance_pre).await?;
+        let req = Self::build_request(method, sub_path, query);
+
+        let response = plugin
+            .call_handle(&mut store, &req)
+            .await
+            .map_err(|e| format!("Execution failed: {}", e))?;
+
+        Self::resolve_response(&mut store, response)
     }
 
     #[allow(dead_code)]

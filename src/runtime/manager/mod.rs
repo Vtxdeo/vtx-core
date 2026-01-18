@@ -12,7 +12,7 @@ use wasmtime::Engine;
 
 use crate::runtime::bus::EventBus;
 use crate::runtime::context::{SecurityPolicy, StreamContext, StreamContextConfig};
-use crate::runtime::executor::{EventDispatchContext, PluginExecutor};
+use crate::runtime::executor::{EventDispatchContext, VtxPluginExecutor};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
@@ -298,7 +298,7 @@ impl PluginManager {
                     return;
                 };
                 while let Some(event) = rx.recv().await {
-                    if let Err(e) = PluginExecutor::dispatch_event_with(
+                    if let Err(e) = VtxPluginExecutor::dispatch_event_with(
                         EventDispatchContext {
                             engine: engine.clone(),
                             registry: registry.clone(),
