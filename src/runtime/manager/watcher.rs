@@ -1,9 +1,9 @@
+use futures_util::StreamExt;
 use std::collections::HashMap;
 use std::time::Duration;
 use tokio::runtime::Handle;
 use tracing::{error, info};
 
-use futures_util::StreamExt;
 use super::{is_vtx_uri, PluginManager};
 
 /// Starts a polling watcher that scans the VFS plugin root on an interval.
