@@ -6,7 +6,7 @@ use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
 use object_store::{GetOptions, GetRange, ObjectMeta};
 
-use super::super::entry::VfsStoreEntry;
+use super::super::entry::VtxVfsStoreEntry;
 use super::super::utils::to_range;
 use super::{VfsObject, VtxVfsManager};
 
@@ -96,7 +96,7 @@ impl VtxVfsManager {
 
     fn meta_to_object(
         &self,
-        entry: &VfsStoreEntry,
+        entry: &VtxVfsStoreEntry,
         meta: &ObjectMeta,
     ) -> anyhow::Result<VfsObject> {
         let uri = entry.to_uri(&meta.location)?;

@@ -5,7 +5,7 @@ use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use url::Url;
 
-use super::super::entry::VfsStoreEntry;
+use super::super::entry::VtxVfsStoreEntry;
 use super::super::utils::{
     file_key, object_path_from_relative, object_path_from_url_path, split_root,
 };
@@ -34,7 +34,7 @@ impl VtxVfsManager {
             } else {
                 let store = LocalFileSystem::new_with_prefix(root.clone())
                     .context("Failed to create local store")?;
-                let entry = VfsStoreEntry {
+                let entry = VtxVfsStoreEntry {
                     scheme: "file".to_string(),
                     authority: None,
                     store: Arc::new(store),
@@ -63,7 +63,7 @@ impl VtxVfsManager {
                     .with_bucket_name(bucket.clone())
                     .build()
                     .context("Failed to create S3 store")?;
-                let entry = VfsStoreEntry {
+                let entry = VtxVfsStoreEntry {
                     scheme: "s3".to_string(),
                     authority: Some(bucket.clone()),
                     store: Arc::new(store),

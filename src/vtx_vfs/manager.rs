@@ -3,7 +3,7 @@ use std::sync::RwLock;
 
 use object_store::path::Path as ObjectPath;
 
-use super::entry::VfsStoreEntry;
+use super::entry::VtxVfsStoreEntry;
 
 mod normalize;
 mod ops;
@@ -14,7 +14,7 @@ mod tests;
 
 #[derive(Clone)]
 struct VfsResolved {
-    entry: VfsStoreEntry,
+    entry: VtxVfsStoreEntry,
     location: Option<ObjectPath>,
 }
 
@@ -26,7 +26,7 @@ pub struct VfsObject {
 }
 
 pub struct VtxVfsManager {
-    stores: RwLock<HashMap<String, VfsStoreEntry>>,
+    stores: RwLock<HashMap<String, VtxVfsStoreEntry>>,
 }
 
 fn _assert_send_sync() {

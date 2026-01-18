@@ -7,14 +7,14 @@ use object_store::ObjectStore;
 use url::Url;
 
 #[derive(Clone)]
-pub(super) struct VfsStoreEntry {
+pub(super) struct VtxVfsStoreEntry {
     pub(super) scheme: String,
     pub(super) authority: Option<String>,
     pub(super) store: Arc<dyn ObjectStore + Send + Sync>,
     pub(super) file_root: Option<PathBuf>,
 }
 
-impl VfsStoreEntry {
+impl VtxVfsStoreEntry {
     pub(super) fn to_uri(&self, location: &ObjectPath) -> anyhow::Result<String> {
         match self.scheme.as_str() {
             "file" => {

@@ -28,7 +28,7 @@ impl api::ffmpeg::Host for StreamContext {
             )
         })?;
 
-        // [Fix] 统一返回类型为 (String, bool)
+        // 统一返回类型为 (String, bool)
         let (input_arg, use_stdin_pipe) = if params.input_id == "pipe:0" {
             ("pipe:0".to_string(), true)
         } else {
