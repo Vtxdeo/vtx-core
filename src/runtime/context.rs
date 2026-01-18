@@ -1,26 +1,21 @@
 use std::sync::Arc;
-use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiView};
+use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiView};
 
 use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::types::HttpAllowRule;
 use crate::storage::VideoRegistry;
+use crate::vtx_vfs::VtxVfsManager;
 
-/// 安全策略等级
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityPolicy {
-    /// 根权限：允许所有操作（文件IO、数据库读写、进程执行）
-    /// 适用于：正常请求处理 (PluginExecutor)
     Root,
-    /// Plugin policy: allow plugin to access its own resources (restricted SQL)
-    /// For HTTP gateway plugin requests
+
     Plugin,
-    /// 受限权限：仅允许只读 SQL，禁止文件 IO 和进程执行
-    /// 适用于：身份验证 (verify_identity)
+
     Restricted,
 }
 
-/// 插件沙箱运行时上下文
 pub struct StreamContext {
     pub table: ResourceTable,
     pub wasi: WasiCtx,
@@ -33,9 +28,9 @@ pub struct StreamContext {
     pub event_bus: Arc<EventBus>,
     pub permissions: std::collections::HashSet<String>,
     pub http_allowlist: Vec<HttpAllowRule>,
-    /// VtxFfmpeg 管理器引用
-    /// 允许 Host Function 访问工具链配置
+
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub vfs: Arc<VtxVfsManager>,
 }
 
 pub struct StreamContextConfig {
@@ -49,6 +44,7 @@ pub struct StreamContextConfig {
     pub event_bus: Arc<EventBus>,
     pub permissions: std::collections::HashSet<String>,
     pub http_allowlist: Vec<HttpAllowRule>,
+    pub vfs: Arc<VtxVfsManager>,
 }
 
 #[derive(Debug, Clone)]
@@ -59,7 +55,6 @@ pub struct CurrentUser {
 }
 
 impl StreamContext {
-    /// 创建一个零信任的插件沙箱上下文
     pub fn new_secure(config: StreamContextConfig) -> Self {
         let StreamContextConfig {
             registry,
@@ -72,6 +67,7 @@ impl StreamContext {
             event_bus,
             permissions,
             http_allowlist,
+            vfs,
         } = config;
         let wasi = WasiCtxBuilder::new()
             .inherit_stdio()
@@ -92,6 +88,7 @@ impl StreamContext {
             permissions,
             http_allowlist,
             vtx_ffmpeg,
+            vfs,
         }
     }
 }
@@ -103,16 +100,14 @@ impl StreamContext {
 }
 
 impl WasiView for StreamContext {
-    fn table(&mut self) -> &mut ResourceTable {
-        &mut self.table
-    }
-
-    fn ctx(&mut self) -> &mut WasiCtx {
-        &mut self.wasi
+    fn ctx(&mut self) -> WasiCtxView<'_> {
+        WasiCtxView {
+            ctx: &mut self.wasi,
+            table: &mut self.table,
+        }
     }
 }
 
-/// 实现资源限制接口
 impl wasmtime::ResourceLimiter for StreamContext {
     fn memory_growing(
         &mut self,
@@ -125,9 +120,9 @@ impl wasmtime::ResourceLimiter for StreamContext {
 
     fn table_growing(
         &mut self,
-        current: u32,
-        desired: u32,
-        maximum: Option<u32>,
+        current: usize,
+        desired: usize,
+        maximum: Option<usize>,
     ) -> wasmtime::Result<bool> {
         self.limiter.table_growing(current, desired, maximum)
     }

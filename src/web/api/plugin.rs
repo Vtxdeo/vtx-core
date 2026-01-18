@@ -1,4 +1,4 @@
-use crate::runtime::executor::PluginExecutor;
+use crate::runtime::executor::VtxPluginExecutor;
 use crate::web::{state::AppState, utils::errors, utils::streaming::StreamProtocolLayer};
 use axum::{
     extract::State,
@@ -38,7 +38,7 @@ pub async fn gateway_handler(
     };
 
     // 2. 执行插件
-    let result = PluginExecutor::execute_runtime(
+    let result = VtxPluginExecutor::execute_runtime(
         &state,
         plugin_runtime,
         sub_path,
@@ -51,7 +51,7 @@ pub async fn gateway_handler(
     // 3. 处理响应
     match result {
         Ok((Some(buffer), status_code)) => {
-            StreamProtocolLayer::process(buffer, &headers, status_code).await
+            StreamProtocolLayer::process(buffer, &headers, status_code, state.vfs.clone()).await
         }
         Ok((None, status_code)) => StatusCode::from_u16(status_code)
             .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR)

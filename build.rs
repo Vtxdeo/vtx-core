@@ -11,9 +11,10 @@ fn main() {
         wasmtime::component::bindgen!({{
             inline: r#"{content}"#,
             world: "plugin",
-            async: true,
+            imports: {{ default: async | ignore_wit }},
+            exports: {{ default: async }},
             with: {{
-                "vtx:api/stream-io/buffer": crate::common::buffer::RealBuffer,
+                "vtx:api/stream-io.buffer": crate::common::buffer::RealBuffer,
             }}
         }});
         "###,

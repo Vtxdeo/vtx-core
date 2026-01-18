@@ -4,7 +4,6 @@ use crate::runtime::context::StreamContext;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-#[async_trait::async_trait]
 impl api::event_bus::Host for StreamContext {
     async fn publish_event(&mut self, topic: String, payload: String) -> Result<(), String> {
         let payload_json =

@@ -1,9 +1,8 @@
 use std::collections::HashSet;
-use std::io::{Cursor, Read, Seek, SeekFrom};
+use std::io::{Cursor, Seek, SeekFrom};
 
 use reqwest::redirect::Policy;
 use reqwest::{header, Client, Method};
-use tokio::task;
 use url::Url;
 use wasmtime::component::Resource;
 
@@ -12,7 +11,6 @@ use crate::runtime::context::{SecurityPolicy, StreamContext};
 
 use super::api;
 
-#[async_trait::async_trait]
 impl api::http_client::Host for StreamContext {
     async fn request(
         &mut self,
@@ -90,7 +88,7 @@ impl api::http_client::Host for StreamContext {
         } else {
             let buffer = RealBuffer {
                 inner: BufferType::Memory(Cursor::new(std::mem::take(&mut body_bytes))),
-                path_hint: None,
+                uri_hint: None,
                 mime_override: None,
                 process_handle: None,
             };
@@ -242,6 +240,8 @@ async fn read_buffer_resource(
     resource: Resource<RealBuffer>,
     max_bytes: Option<u64>,
 ) -> Result<Vec<u8>, String> {
+    use std::io::Read;
+
     let rb = ctx
         .table
         .get_mut(&resource)
@@ -264,27 +264,23 @@ async fn read_buffer_resource(
                 .map_err(|e| format!("Buffer read failed: {}", e))?;
             Ok(data)
         }
-        BufferType::File(file) => {
-            let len = file
-                .metadata()
-                .map(|m| m.len())
-                .map_err(|e| format!("File metadata failed: {}", e))?;
+        BufferType::Object { uri } => {
+            let meta = ctx
+                .vfs
+                .head(uri)
+                .await
+                .map_err(|e| format!("VFS metadata failed: {}", e))?;
             if let Some(limit) = max_bytes {
-                if len > limit {
+                if meta.size > limit {
                     return Err("Request body exceeded max-request-bytes".into());
                 }
             }
-            let mut file = file
-                .try_clone()
-                .map_err(|e| format!("File clone failed: {}", e))?;
-            task::spawn_blocking(move || {
-                let mut data = Vec::with_capacity(len as usize);
-                file.read_to_end(&mut data)
-                    .map(|_| data)
-                    .map_err(|e| format!("File read failed: {}", e))
-            })
-            .await
-            .map_err(|e| format!("IO join error: {}", e))?
+            Ok(ctx
+                .vfs
+                .read_range(uri, 0, meta.size)
+                .await
+                .map(|bytes| bytes.to_vec())
+                .map_err(|e| format!("VFS read failed: {}", e))?)
         }
         BufferType::Pipe(_) => Err("Pipe body is not supported".into()),
     };

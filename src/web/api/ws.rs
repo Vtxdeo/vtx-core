@@ -61,7 +61,7 @@ async fn handle_socket(mut socket: WebSocket, event_bus: Arc<EventBus>, topics: 
                 };
                 match serde_json::to_string(&event) {
                     Ok(text) => {
-                        if socket.send(Message::Text(text)).await.is_err() {
+                        if socket.send(Message::Text(text.into())).await.is_err() {
                             break;
                         }
                     }

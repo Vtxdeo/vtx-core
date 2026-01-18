@@ -1,7 +1,6 @@
 use super::api;
 use crate::runtime::context::StreamContext;
 
-#[async_trait::async_trait]
 impl api::context::Host for StreamContext {
     async fn get_current_user(&mut self) -> Option<api::auth_types::CurrentUser> {
         self.current_user
