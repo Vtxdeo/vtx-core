@@ -327,7 +327,7 @@ fn object_path_from_relative(path: &Path) -> anyhow::Result<Option<ObjectPath>> 
     if trimmed.is_empty() {
         return Ok(None);
     }
-    Ok(Some(ObjectPath::from(trimmed)))
+    Ok(Some(ObjectPath::parse(trimmed)?))
 }
 
 fn object_path_from_url_path(path: &str) -> anyhow::Result<Option<ObjectPath>> {
