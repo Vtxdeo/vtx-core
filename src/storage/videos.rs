@@ -39,11 +39,15 @@ pub(crate) async fn scan_directory_with_abort<F>(
 where
     F: Fn() -> Result<(), ScanAbort> + Send + Sync,
 {
+    let debug_scan = std::env::var_os("VTX_DEBUG_SCAN").is_some();
     let conn = pool
         .get()
         .map_err(|e| anyhow::anyhow!("DB Connection failed: {}", e))?;
 
     let root_uri = vfs.ensure_prefix_uri(root_uri)?;
+    if debug_scan {
+        eprintln!("[scanner] root_uri={}", root_uri);
+    }
     info!("[scanner] start scanning directory: {}", root_uri);
 
     let mut stmt = conn.prepare("SELECT full_path FROM videos")?;
@@ -57,6 +61,8 @@ where
 
     let mut new_videos = Vec::new();
     let mut stream = vfs.list_objects(&root_uri).await?;
+    let mut seen = 0usize;
+    let mut errors = 0usize;
 
     while let Some(item) = stream.next().await {
         if let Err(abort) = should_continue() {
@@ -64,18 +70,34 @@ where
         }
         let obj = match item {
             Ok(value) => value,
-            Err(_) => continue,
+            Err(err) => {
+                errors += 1;
+                if debug_scan {
+                    eprintln!("[scanner] list error: {}", err);
+                }
+                continue;
+            }
         };
+        seen += 1;
+        if debug_scan {
+            eprintln!("[scanner] candidate uri={}", obj.uri);
+        }
 
         let ext = extract_extension(&obj.uri);
         if !matches!(
             ext.as_deref(),
             Some("mp4") | Some("mkv") | Some("mov") | Some("avi") | Some("webm")
         ) {
+            if debug_scan {
+                eprintln!("[scanner] skip uri={} ext={:?}", obj.uri, ext);
+            }
             continue;
         }
 
         if existing_paths.contains(&obj.uri) {
+            if debug_scan {
+                eprintln!("[scanner] already known uri={}", obj.uri);
+            }
             continue;
         }
 
@@ -112,6 +134,15 @@ where
         tx.commit()?;
         info!(
             "[scanner] scan completed: {} new videos registered",
+            new_videos.len()
+        );
+    }
+
+    if debug_scan {
+        eprintln!(
+            "[scanner] list completed: seen={} errors={} new={}",
+            seen,
+            errors,
             new_videos.len()
         );
     }
