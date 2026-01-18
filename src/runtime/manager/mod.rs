@@ -18,7 +18,7 @@ use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 use anyhow::Context;
 use futures_util::StreamExt;
 use url::Url;
@@ -57,7 +57,6 @@ pub struct PluginRuntime {
     pub source_uri: String,
 }
 
-/// 插件状态视图
 #[derive(Serialize)]
 pub struct PluginStatus {
     pub id: String,
@@ -83,9 +82,9 @@ pub struct PluginManager {
     registry: VideoRegistry,
     plugins: Arc<RwLock<HashMap<String, Arc<PluginRuntime>>>>,
     routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
-    /// 鉴权提供者 ID
+
     auth_provider: Option<String>,
-    /// VtxFfmpeg 工具链管理器
+
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
     pub vfs: Arc<VfsManager>,
     max_buffer_read_bytes: u64,
@@ -155,7 +154,6 @@ impl PluginManager {
 
         manager.load_all_plugins().await?;
 
-        // 确保配置的 auth_provider 确实已加载，防止单点故障导致的系统裸奔或 500 错误
         if let Some(auth_id) = &manager.auth_provider {
             let plugins = manager.plugins.read().unwrap();
             if !plugins.contains_key(auth_id) {
@@ -163,7 +161,7 @@ impl PluginManager {
                     "[Fatal] Configured auth_provider '{}' not found in loaded plugins!",
                     auth_id
                 );
-                // 必须阻止启动，迫使管理员检查配置或插件文件
+
                 return Err(anyhow::anyhow!(
                     "Critical: Configured auth_provider '{}' is missing. Startup aborted.",
                     auth_id
@@ -265,7 +263,6 @@ impl PluginManager {
             }
         }
 
-        // 原子替换：如果是 Modify 事件触发的重载，这里会直接覆盖旧的 Arc
         plugins_lock.insert(new_id.clone(), runtime.clone());
 
         routes_lock.retain(|p| p.id != *new_id);
@@ -360,7 +357,6 @@ impl PluginManager {
     }
 
     pub fn uninstall(&self, plugin_id: &str, keep_data: bool) -> anyhow::Result<()> {
-        // 禁止卸载核心鉴权插件。即使文件被删除，内存中也必须保留该插件。
         if let Some(auth_id) = &self.auth_provider {
             if auth_id == plugin_id {
                 warn!(
@@ -400,7 +396,6 @@ impl PluginManager {
         Ok(())
     }
 
-    /// 获取所有已加载插件的状态列表
     pub fn list_plugins(&self) -> Vec<PluginStatus> {
         let plugins = self.plugins.read().unwrap();
         plugins
@@ -425,7 +420,6 @@ impl PluginManager {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // 性能优化：O(1) 精确查找
         if let Some(provider_id) = &self.auth_provider {
             let runtime = {
                 let plugins = self.plugins.read().unwrap();
@@ -437,8 +431,6 @@ impl PluginManager {
                     Err(code) => return Err(code),
                 }
             } else {
-                // 理论上由 new() 和 uninstall() 的保护机制，此处不应到达
-                // 但为了防御性编程，保留此错误分支
                 error!(
                     "[Auth] Critical: auth_provider '{}' missing at runtime!",
                     provider_id
@@ -446,7 +438,6 @@ impl PluginManager {
                 return Err(500);
             }
         } else {
-            // 默认模式：责任链遍历
             let plugins: Vec<Arc<PluginRuntime>> =
                 { self.plugins.read().unwrap().values().cloned().collect() };
 
@@ -457,8 +448,7 @@ impl PluginManager {
                 {
                     Ok(user) => return Ok(user),
                     Err(code) => {
-                        // 401/403 表示该插件无法处理或拒绝，继续尝试下一个
-                        if code == 401 || code == 403 {
+                        if code == 401 {
                             continue;
                         }
                         return Err(code);

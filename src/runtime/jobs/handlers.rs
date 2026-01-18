@@ -3,7 +3,7 @@ use crate::storage::{
     videos::{ScanAbort, ScanOutcome},
     VideoRegistry,
 };
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 use serde::Deserialize;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},

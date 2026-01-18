@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use tempfile::tempdir;
 use vtx_core::storage::VideoRegistry;
-use vtx_core::vfs::VfsManager;
+use vtx_core::vtx_vfs::VfsManager;
 
 #[tokio::test]
 async fn scan_directory_registers_new_videos() {

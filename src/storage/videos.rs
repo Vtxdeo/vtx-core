@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 
 pub(crate) enum ScanAbort {
     Canceled,

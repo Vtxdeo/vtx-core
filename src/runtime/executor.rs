@@ -5,14 +5,11 @@ use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::{api, Plugin};
 use crate::runtime::manager::PluginRuntime;
 use crate::storage::VideoRegistry;
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 use crate::web::state::AppState;
 use std::sync::Arc;
 use wasmtime::Store;
 
-/// 插件请求执行器
-///
-/// 职责：封装单次请求的 Wasm 环境构建、执行与资源回收过程。
 pub struct PluginExecutor;
 
 pub struct EventDispatchContext {
@@ -26,13 +23,6 @@ pub struct EventDispatchContext {
 }
 
 impl PluginExecutor {
-    /// 执行指定的插件实例
-    ///
-    /// - `state`: 全局应用状态
-    /// - `runtime`: 目标插件的运行时上下文（包含预编译实例）
-    /// - `sub_path`: 剔除挂载点后的子路径（传给插件的 path 参数）
-    /// - `method`: HTTP 方法 (e.g., "GET", "POST")
-    /// - `query`: URL 查询字符串 (e.g., "page=1&limit=10")
     pub async fn execute_runtime(
         state: &Arc<AppState>,
         runtime: Arc<PluginRuntime>,
@@ -43,10 +33,9 @@ impl PluginExecutor {
     ) -> Result<(Option<RealBuffer>, u16), String> {
         let engine = state.engine.clone();
         let registry = state.registry.clone();
-        // 获取全局的 ffmpeg 管理器引用
+
         let vtx_ffmpeg = state.vtx_ffmpeg.clone();
 
-        // 使用传入的 instance_pre，而非去 manager 全局查找
         let instance_pre = runtime.instance_pre.clone();
         let plugin_id = runtime.id.clone();
 
@@ -59,7 +48,6 @@ impl PluginExecutor {
             .tables(1000)
             .build();
 
-        // 注入 vtx_ffmpeg 到上下文
         let permissions = runtime
             .policy
             .permissions

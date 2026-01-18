@@ -12,7 +12,7 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 
 use crate::common::buffer::{BufferType, RealBuffer};
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 
 struct ProcessStream {
     stream: ReaderStream<ChildStdout>,

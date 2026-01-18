@@ -27,7 +27,7 @@ use vtx_core::{
         manager::{PluginManager, PluginManagerConfig},
     },
     storage::VideoRegistry,
-    vfs::VfsManager,
+    vtx_vfs::VfsManager,
     web::{
         api::{admin, ws},
         state::AppState,

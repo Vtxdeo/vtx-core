@@ -1,7 +1,7 @@
 use crate::config::JobQueueSettings;
 use crate::storage::jobs::JobRecord;
 use crate::storage::VideoRegistry;
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -69,7 +69,13 @@ pub(crate) async fn run_once(
     settings: &JobQueueSettings,
 ) -> WorkerTick {
     let lease_secs = settings.lease_secs;
-    maybe_sweep(state, registry, settings.timeout_secs, settings.sweep_interval_ms).await;
+    maybe_sweep(
+        state,
+        registry,
+        settings.timeout_secs,
+        settings.sweep_interval_ms,
+    )
+    .await;
     maybe_reclaim(state, registry, settings.reclaim_interval_ms).await;
 
     let claim_result = tokio::task::spawn_blocking({

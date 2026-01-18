@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::ops::RangeInclusive;
-use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use anyhow::Context;
@@ -10,16 +9,14 @@ use futures_util::StreamExt;
 use object_store::aws::AmazonS3Builder;
 use object_store::local::LocalFileSystem;
 use object_store::path::Path as ObjectPath;
-use object_store::{GetOptions, GetRange, ObjectMeta, ObjectStore};
+use object_store::{GetOptions, GetRange, ObjectMeta};
 use url::Url;
 
-#[derive(Clone)]
-struct VfsStoreEntry {
-    scheme: String,
-    authority: Option<String>,
-    store: Arc<dyn ObjectStore + Send + Sync>,
-    file_root: Option<PathBuf>,
-}
+use super::entry::VfsStoreEntry;
+use super::utils::{
+    file_key, normalize_path, object_path_from_relative, object_path_from_url_path, same_authority,
+    split_root, to_range,
+};
 
 #[derive(Clone)]
 struct VfsResolved {
@@ -270,114 +267,4 @@ impl VfsManager {
             etag: meta.e_tag.clone(),
         })
     }
-}
-
-impl VfsStoreEntry {
-    fn to_uri(&self, location: &ObjectPath) -> anyhow::Result<String> {
-        match self.scheme.as_str() {
-            "file" => {
-                let root = self
-                    .file_root
-                    .as_ref()
-                    .context("Missing file root for file store")?;
-                let rel = location
-                    .as_ref()
-                    .replace('/', std::path::MAIN_SEPARATOR_STR);
-                let os_path = root.join(rel);
-                Ok(Url::from_file_path(&os_path)
-                    .map_err(|_| anyhow::anyhow!("Invalid file path"))?
-                    .to_string())
-            }
-            "s3" => {
-                let bucket = self
-                    .authority
-                    .as_ref()
-                    .context("Missing bucket for s3 store")?;
-                let path = location.as_ref();
-                if path.is_empty() {
-                    Ok(format!("s3://{}", bucket))
-                } else {
-                    Ok(format!("s3://{}/{}", bucket, path))
-                }
-            }
-            scheme => Err(anyhow::anyhow!("Unsupported scheme: {}", scheme)),
-        }
-    }
-}
-
-fn split_root(path: &Path) -> (PathBuf, PathBuf) {
-    let mut root = PathBuf::new();
-    for comp in path.components() {
-        match comp {
-            Component::Prefix(prefix) => root.push(prefix.as_os_str()),
-            Component::RootDir => root.push(std::path::MAIN_SEPARATOR.to_string()),
-            _ => break,
-        }
-    }
-    if root.as_os_str().is_empty() {
-        root.push(std::path::MAIN_SEPARATOR.to_string());
-    }
-    let relative = path.strip_prefix(&root).unwrap_or(path).to_path_buf();
-    (root, relative)
-}
-
-fn object_path_from_relative(path: &Path) -> anyhow::Result<Option<ObjectPath>> {
-    let raw = path.to_string_lossy().replace('\\', "/");
-    let trimmed = raw.trim_start_matches('/');
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(ObjectPath::parse(trimmed)?))
-}
-
-fn object_path_from_url_path(path: &str) -> anyhow::Result<Option<ObjectPath>> {
-    let trimmed = path.trim_start_matches('/');
-    if trimmed.is_empty() {
-        return Ok(None);
-    }
-    Ok(Some(ObjectPath::from(trimmed)))
-}
-
-fn normalize_path(path: &str) -> String {
-    let trailing = path.ends_with('/');
-    let mut parts = Vec::new();
-    for part in path.split('/') {
-        if part.is_empty() || part == "." {
-            continue;
-        }
-        if part == ".." {
-            parts.pop();
-            continue;
-        }
-        parts.push(part);
-    }
-    let mut normalized = String::from("/");
-    normalized.push_str(&parts.join("/"));
-    if trailing && !normalized.ends_with('/') {
-        normalized.push('/');
-    }
-    if normalized.len() > 1 && normalized.ends_with('/') && parts.is_empty() {
-        normalized.truncate(1);
-    }
-    normalized
-}
-
-fn same_authority(left: &Url, right: &Url) -> bool {
-    left.scheme() == right.scheme()
-        && left.host_str() == right.host_str()
-        && left.port_or_known_default() == right.port_or_known_default()
-}
-
-fn to_range(start: u64, end: u64) -> anyhow::Result<std::ops::Range<usize>> {
-    if end < start {
-        return Err(anyhow::anyhow!("Invalid range"));
-    }
-    let start = usize::try_from(start)?;
-    let end = usize::try_from(end.saturating_add(1))?;
-    Ok(start..end)
-}
-
-fn file_key(root: &Path) -> String {
-    let raw = root.to_string_lossy().replace('\\', "/");
-    format!("file://{}", raw.trim_end_matches('/'))
 }

@@ -5,7 +5,7 @@ use crate::runtime::{
     manager::migration_policy,
 };
 use crate::storage::VideoRegistry;
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 use anyhow::Context;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -15,7 +15,6 @@ use wasmtime::{
     Engine,
 };
 
-/// 表示插件加载的结果，包括插件 ID、Manifest 和已编译的组件
 pub struct LoadResult {
     pub plugin_id: String,
     pub manifest: crate::runtime::host_impl::api::types::Manifest,
@@ -24,12 +23,6 @@ pub struct LoadResult {
     pub component: Component,
 }
 
-/// 加载并迁移插件：
-/// - 仅支持 `.vtx` 包
-/// - 解包 `.vtx` -> component bytes（通过 vtx-format）
-/// - 编译 component -> 实例化 -> 获取元数据 -> 校验路径 -> 执行迁移 -> 注册资源
-///
-/// IO 复杂度：涉及文件读取、Wasm 编译及多次数据库交互，需注意 I/O 延迟。
 pub async fn load_and_migrate(
     engine: &Engine,
     registry: &VideoRegistry,
@@ -43,7 +36,6 @@ pub async fn load_and_migrate(
 
     let (component, vtx_meta) = load_component_from_vtx(engine, &vfs, vtx_uri).await?;
 
-    // Root 权限允许迁移
     let ctx = StreamContext::new_secure(StreamContextConfig {
         registry: registry.clone(),
         vtx_ffmpeg,
@@ -78,7 +70,6 @@ pub async fn load_and_migrate(
         ));
     }
 
-    // Persist package metadata (best-effort, v2 only)
     if let Some(meta) = vtx_meta.as_ref() {
         if let Err(e) = registry.set_plugin_metadata(&plugin_id, meta) {
             tracing::warn!(
@@ -120,11 +111,10 @@ pub async fn load_and_migrate(
             rewritten_migrations.len()
         );
 
-        // 获取可变连接以启动事务
-        let mut conn = registry.get_conn()?;
-
-        // 开启数据库事务，确保迁移操作的原子性
-        // 若中途失败，所有已执行的 SQL 将自动回滚，防止数据库处于损坏状态
+        let mut conn = registry
+            .pool
+            .get()
+            .context("Failed to get database connection")?;
         let tx = conn
             .transaction()
             .context("Failed to start database transaction")?;
@@ -136,23 +126,22 @@ pub async fn load_and_migrate(
                 &plugin_id
             );
 
-            // 使用事务句柄执行 SQL
             if let Err(e) = tx.execute(sql, []) {
                 error!(
                     "[plugin/migration] Migration failed at step {}: {}. Rolling back transaction.",
                     idx + 1,
                     e
                 );
-                // 此时直接返回错误，Transaction Drop 时会自动 Rollback
+
                 return Err(anyhow::anyhow!("Migration failed: {}", e));
             }
         }
 
-        // 提交事务
         tx.commit()
             .context("Failed to commit migration transaction")?;
 
-        // 迁移成功后注册资源表
+        registry.set_plugin_version(&plugin_id, rewritten_migrations.len());
+
         for table_name in normalized_resources {
             registry.register_resource(&plugin_id, "TABLE", &table_name);
             info!(
@@ -161,8 +150,6 @@ pub async fn load_and_migrate(
             );
         }
 
-        // 更新版本号
-        registry.set_plugin_version(&plugin_id, rewritten_migrations.len());
         info!(
             "[plugin/migration] Migration complete for plugin: {}",
             &plugin_id

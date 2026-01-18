@@ -1,6 +1,6 @@
 use crate::config::JobQueueSettings;
 use crate::storage::VideoRegistry;
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 use std::sync::Arc;
 use tracing::{error, warn};
 
@@ -15,9 +15,10 @@ pub fn spawn_workers(registry: VideoRegistry, vfs: Arc<VfsManager>, settings: Jo
     let workers = std::cmp::max(1, settings.max_concurrent) as usize;
     let adaptive_settings = settings.adaptive_scan.clone();
     let scan_limiter = if adaptive_settings.enabled {
-        let max =
-            std::cmp::max(adaptive_settings.min_concurrent, adaptive_settings.max_concurrent)
-                as usize;
+        let max = std::cmp::max(
+            adaptive_settings.min_concurrent,
+            adaptive_settings.max_concurrent,
+        ) as usize;
         Some(Arc::new(AdaptiveScanLimiter::new(max)))
     } else {
         None
@@ -78,14 +79,5 @@ pub async fn run_worker_once_for_tests(
     settings: &JobQueueSettings,
 ) -> bool {
     let mut state = WorkerState::new();
-    run_once(
-        &mut state,
-        worker_id,
-        registry,
-        vfs,
-        None,
-        settings,
-    )
-    .await
-        == WorkerTick::DidWork
+    run_once(&mut state, worker_id, registry, vfs, None, settings).await == WorkerTick::DidWork
 }

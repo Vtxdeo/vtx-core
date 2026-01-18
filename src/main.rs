@@ -2,7 +2,7 @@ mod common;
 mod config;
 mod runtime;
 mod storage;
-mod vfs;
+mod vtx_vfs;
 mod web;
 
 use axum::{
@@ -25,7 +25,7 @@ use crate::runtime::{
     manager::{PluginManager, PluginManagerConfig},
 };
 use crate::storage::VideoRegistry;
-use crate::vfs::VfsManager;
+use crate::vtx_vfs::VfsManager;
 use crate::web::{
     api::{admin, plugin, ws},
     middleware::auth::auth_middleware,
@@ -34,7 +34,6 @@ use crate::web::{
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    // 初始化日志
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -56,26 +55,19 @@ async fn main() -> anyhow::Result<()> {
         settings.plugins.max_memory_mb
     );
 
-    // 基础设施初始化
     let mut wasm_config = wasmtime::Config::new();
     wasm_config.wasm_component_model(true);
     wasm_config.async_support(true);
 
     let mut pooling_strategy = wasmtime::PoolingAllocationConfig::default();
 
-    // 设置最大保留的热实例槽位
-    pooling_strategy.max_unused_warm_slots(16);
-
-    // 设置单个线性内存的最大页数
-    // Wasm 页大小为 64KB。
-    // 动态计算: (max_mb * 1024 * 1024) / 65536
     let max_memory_bytes = settings.plugins.max_memory_mb * 1024 * 1024;
     let max_wasm_pages = max_memory_bytes / 65536;
 
-    // 必须确保 Pooling Allocator 的预留空间 >= 实例请求的空间
+    pooling_strategy.max_unused_warm_slots(16);
+
     pooling_strategy.memory_pages(max_wasm_pages);
 
-    // 设置并发组件实例上限
     pooling_strategy.total_component_instances(100);
 
     wasm_config.allocation_strategy(wasmtime::InstanceAllocationStrategy::Pooling(
@@ -95,12 +87,10 @@ async fn main() -> anyhow::Result<()> {
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
     let vfs = Arc::new(VfsManager::new()?);
 
-    // 初始化 vtx-ffmpeg 中间层管理器
     let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(
         settings.vtx_ffmpeg.execution_timeout_secs,
     )?);
 
-    // 初始化插件管理器 (传入 vtx_ffmpeg_manager)
     let event_bus = Arc::new(EventBus::new(256));
     let (ipc_outbound_tx, ipc_outbound_rx) = tokio::sync::mpsc::channel(100);
     IpcTransport::spawn(ipc_outbound_rx);
@@ -119,7 +109,6 @@ async fn main() -> anyhow::Result<()> {
     })
     .await?;
 
-    // 构造全局状态
     let state = Arc::new(AppState {
         engine,
         plugin_manager,
@@ -134,10 +123,8 @@ async fn main() -> anyhow::Result<()> {
     jobs::recover_startup(state.registry.clone(), settings.job_queue.clone()).await;
     jobs::spawn_workers(state.registry.clone(), vfs, settings.job_queue.clone());
 
-    // 路由定义
     let app = Router::new()
         .route("/health", get(|| async { "OK" }))
-        // 管理后台路由 (优先级最高)
         .nest(
             "/admin",
             Router::new()
@@ -158,8 +145,6 @@ async fn main() -> anyhow::Result<()> {
                     auth_middleware,
                 )),
         )
-        // 插件网关路由 (Catch-All)
-        // 任何未被匹配的请求都会进入 gateway_handler，由它分发给具体插件
         .route("/*path", any(plugin::gateway_handler))
         .with_state(state)
         .layer(CorsLayer::permissive())
