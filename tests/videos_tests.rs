@@ -1,14 +1,14 @@
 use std::collections::HashSet;
 use tempfile::tempdir;
 use vtx_core::storage::VideoRegistry;
-use vtx_core::vtx_vfs::VfsManager;
+use vtx_core::vtx_vfs::VtxVfsManager;
 
 #[tokio::test]
 async fn scan_directory_registers_new_videos() {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
     let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
-    let vfs = VfsManager::new().expect("vfs");
+    let vfs = VtxVfsManager::new().expect("vfs");
 
     let root = temp_dir.path().join("media");
     std::fs::create_dir_all(&root).expect("create root");

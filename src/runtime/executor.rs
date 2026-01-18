@@ -5,7 +5,7 @@ use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::{api, Plugin};
 use crate::runtime::manager::PluginRuntime;
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use crate::web::state::AppState;
 use std::sync::Arc;
 use wasmtime::Store;
@@ -16,7 +16,7 @@ pub struct EventDispatchContext {
     pub engine: wasmtime::Engine,
     pub registry: VideoRegistry,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
-    pub vfs: Arc<VfsManager>,
+    pub vfs: Arc<VtxVfsManager>,
     pub event_bus: Arc<EventBus>,
     pub max_memory_bytes: usize,
     pub max_buffer_read_bytes: u64,

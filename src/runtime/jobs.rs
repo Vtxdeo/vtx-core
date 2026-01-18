@@ -1,6 +1,6 @@
 use crate::config::JobQueueSettings;
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use std::sync::Arc;
 use tracing::{error, warn};
 
@@ -11,7 +11,7 @@ mod worker;
 use adaptive::{spawn_adaptive_controller, AdaptiveScanLimiter};
 use worker::{run_once, spawn_worker, WorkerState, WorkerTick};
 
-pub fn spawn_workers(registry: VideoRegistry, vfs: Arc<VfsManager>, settings: JobQueueSettings) {
+pub fn spawn_workers(registry: VideoRegistry, vfs: Arc<VtxVfsManager>, settings: JobQueueSettings) {
     let workers = std::cmp::max(1, settings.max_concurrent) as usize;
     let adaptive_settings = settings.adaptive_scan.clone();
     let scan_limiter = if adaptive_settings.enabled {
@@ -75,7 +75,7 @@ pub async fn recover_startup(registry: VideoRegistry, settings: JobQueueSettings
 pub async fn run_worker_once_for_tests(
     worker_id: &str,
     registry: &VideoRegistry,
-    vfs: Arc<VfsManager>,
+    vfs: Arc<VtxVfsManager>,
     settings: &JobQueueSettings,
 ) -> bool {
     let mut state = WorkerState::new();

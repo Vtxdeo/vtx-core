@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use tracing::{error, info};
 use uuid::Uuid;
 
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 
 pub(crate) enum ScanAbort {
     Canceled,
@@ -21,7 +21,7 @@ pub(crate) enum ScanOutcome {
 
 pub(crate) async fn scan_directory(
     pool: &Pool<SqliteConnectionManager>,
-    vfs: &VfsManager,
+    vfs: &VtxVfsManager,
     root_uri: &str,
 ) -> anyhow::Result<Vec<VideoMeta>> {
     match scan_directory_with_abort(pool, vfs, root_uri, || Ok(())).await? {
@@ -32,7 +32,7 @@ pub(crate) async fn scan_directory(
 
 pub(crate) async fn scan_directory_with_abort<F>(
     pool: &Pool<SqliteConnectionManager>,
-    vfs: &VfsManager,
+    vfs: &VtxVfsManager,
     root_uri: &str,
     should_continue: F,
 ) -> anyhow::Result<ScanOutcome>

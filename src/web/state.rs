@@ -4,7 +4,7 @@ use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::manager::PluginManager;
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use wasmtime::Engine;
@@ -15,7 +15,7 @@ pub struct AppState {
     pub registry: VideoRegistry,
     pub config: Settings,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
-    pub vfs: Arc<VfsManager>,
+    pub vfs: Arc<VtxVfsManager>,
     pub event_bus: Arc<EventBus>,
     #[allow(dead_code)]
     pub ipc_outbound: mpsc::Sender<SystemRequest>,

@@ -27,7 +27,7 @@ use vtx_core::{
         manager::{PluginManager, PluginManagerConfig},
     },
     storage::VideoRegistry,
-    vtx_vfs::VfsManager,
+    vtx_vfs::VtxVfsManager,
     web::{
         api::{admin, ws},
         state::AppState,
@@ -77,7 +77,7 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
 
     let vtx_ffmpeg = Arc::new(VtxFfmpegManager::new(30).expect("vtx_ffmpeg"));
     let event_bus = Arc::new(EventBus::new(8));
-    let vfs = Arc::new(VfsManager::new().expect("vfs"));
+    let vfs = Arc::new(VtxVfsManager::new().expect("vfs"));
     let (ipc_outbound, _ipc_inbound) = mpsc::channel(8);
 
     let plugin_manager = PluginManager::new(PluginManagerConfig {

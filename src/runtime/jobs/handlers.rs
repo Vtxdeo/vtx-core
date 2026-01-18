@@ -3,7 +3,7 @@ use crate::storage::{
     videos::{ScanAbort, ScanOutcome},
     VideoRegistry,
 };
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use serde::Deserialize;
 use std::sync::{
     atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -20,7 +20,7 @@ struct ScanDirectoryPayload {
 
 pub(crate) fn handle_job(
     registry: &VideoRegistry,
-    vfs: Arc<VfsManager>,
+    vfs: Arc<VtxVfsManager>,
     job_id: &str,
     job_type: &str,
     payload: &str,
@@ -44,7 +44,7 @@ pub(crate) fn handle_job(
 
 fn handle_scan_directory(
     registry: &VideoRegistry,
-    vfs: Arc<VfsManager>,
+    vfs: Arc<VtxVfsManager>,
     job_id: &str,
     payload: &serde_json::Value,
     timeout_secs: u64,
@@ -149,7 +149,7 @@ fn handle_scan_directory(
 fn validate_scan_path(
     requested: &str,
     allowed_roots: &[String],
-    vfs: &VfsManager,
+    vfs: &VtxVfsManager,
 ) -> Result<String, String> {
     vfs.match_allowed_prefix(requested, allowed_roots)
 }

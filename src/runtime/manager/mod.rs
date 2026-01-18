@@ -18,7 +18,7 @@ use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use anyhow::Context;
 use futures_util::StreamExt;
 use url::Url;
@@ -86,7 +86,7 @@ pub struct PluginManager {
     auth_provider: Option<String>,
 
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
-    pub vfs: Arc<VfsManager>,
+    pub vfs: Arc<VtxVfsManager>,
     max_buffer_read_bytes: u64,
     max_memory_bytes: usize,
     event_bus: Arc<EventBus>,
@@ -99,7 +99,7 @@ pub struct PluginManagerConfig {
     pub linker: Linker<StreamContext>,
     pub auth_provider: Option<String>,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
-    pub vfs: Arc<VfsManager>,
+    pub vfs: Arc<VtxVfsManager>,
     pub max_buffer_read_bytes: u64,
     pub max_memory_bytes: usize,
     pub event_bus: Arc<EventBus>,
@@ -506,7 +506,7 @@ impl PluginManager {
     }
 }
 
-fn normalize_plugin_root(vfs: &VfsManager, raw: &str) -> anyhow::Result<String> {
+fn normalize_plugin_root(vfs: &VtxVfsManager, raw: &str) -> anyhow::Result<String> {
     if raw.contains("://") {
         let mut url = Url::parse(raw).context("Invalid plugin root URI")?;
         if is_vtx_path(url.path()) {

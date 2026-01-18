@@ -5,7 +5,7 @@ use crate::runtime::{
     manager::migration_policy,
 };
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use anyhow::Context;
 use std::sync::Arc;
 use tracing::{debug, error, info};
@@ -29,7 +29,7 @@ pub async fn load_and_migrate(
     linker: &Linker<StreamContext>,
     vtx_uri: &str,
     vtx_ffmpeg: Arc<VtxFfmpegManager>,
-    vfs: Arc<VfsManager>,
+    vfs: Arc<VtxVfsManager>,
     event_bus: Arc<crate::runtime::bus::EventBus>,
 ) -> anyhow::Result<LoadResult> {
     enforce_vtx_only(vtx_uri)?;
@@ -186,7 +186,7 @@ fn enforce_vtx_only(uri: &str) -> anyhow::Result<()> {
 
 async fn load_component_from_vtx(
     engine: &Engine,
-    vfs: &VfsManager,
+    vfs: &VtxVfsManager,
     uri: &str,
 ) -> anyhow::Result<(Component, Option<super::VtxPackageMetadata>)> {
     let meta = vfs

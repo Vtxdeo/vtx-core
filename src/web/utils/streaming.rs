@@ -12,7 +12,7 @@ use tokio_util::io::ReaderStream;
 use url::Url;
 
 use crate::common::buffer::{BufferType, RealBuffer};
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 
 struct ProcessStream {
     stream: ReaderStream<ChildStdout>,
@@ -35,7 +35,7 @@ impl StreamProtocolLayer {
         buffer: RealBuffer,
         headers: &HeaderMap,
         status_code: u16,
-        vfs: Arc<VfsManager>,
+        vfs: Arc<VtxVfsManager>,
     ) -> Response {
         let status = StatusCode::from_u16(status_code).unwrap_or(StatusCode::OK);
 
@@ -87,7 +87,7 @@ impl StreamProtocolLayer {
         uri_hint: Option<String>,
         headers: &HeaderMap,
         default_status: StatusCode,
-        vfs: Arc<VfsManager>,
+        vfs: Arc<VtxVfsManager>,
     ) -> Response {
         let meta = match vfs.head(&uri).await {
             Ok(value) => value,

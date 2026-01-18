@@ -1,7 +1,7 @@
 use crate::config::JobQueueSettings;
 use crate::storage::jobs::JobRecord;
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc,
@@ -36,7 +36,7 @@ pub(crate) enum WorkerTick {
 pub(crate) fn spawn_worker(
     worker_id: String,
     registry: VideoRegistry,
-    vfs: Arc<VfsManager>,
+    vfs: Arc<VtxVfsManager>,
     scan_limiter: Option<Arc<AdaptiveScanLimiter>>,
     settings: JobQueueSettings,
 ) {
@@ -64,7 +64,7 @@ pub(crate) async fn run_once(
     state: &mut WorkerState,
     worker_id: &str,
     registry: &VideoRegistry,
-    vfs: Arc<VfsManager>,
+    vfs: Arc<VtxVfsManager>,
     scan_limiter: Option<Arc<AdaptiveScanLimiter>>,
     settings: &JobQueueSettings,
 ) -> WorkerTick {
@@ -168,7 +168,7 @@ async fn process_job(
     job: JobRecord,
     worker_id: String,
     registry: VideoRegistry,
-    vfs: Arc<VfsManager>,
+    vfs: Arc<VtxVfsManager>,
     scan_limiter: Option<Arc<AdaptiveScanLimiter>>,
     lease_secs: u64,
     timeout_secs: u64,

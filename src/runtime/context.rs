@@ -5,7 +5,7 @@ use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::types::HttpAllowRule;
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SecurityPolicy {
@@ -30,7 +30,7 @@ pub struct StreamContext {
     pub http_allowlist: Vec<HttpAllowRule>,
 
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
-    pub vfs: Arc<VfsManager>,
+    pub vfs: Arc<VtxVfsManager>,
 }
 
 pub struct StreamContextConfig {
@@ -44,7 +44,7 @@ pub struct StreamContextConfig {
     pub event_bus: Arc<EventBus>,
     pub permissions: std::collections::HashSet<String>,
     pub http_allowlist: Vec<HttpAllowRule>,
-    pub vfs: Arc<VfsManager>,
+    pub vfs: Arc<VtxVfsManager>,
 }
 
 #[derive(Debug, Clone)]

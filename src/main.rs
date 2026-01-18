@@ -25,7 +25,7 @@ use crate::runtime::{
     manager::{PluginManager, PluginManagerConfig},
 };
 use crate::storage::VideoRegistry;
-use crate::vtx_vfs::VfsManager;
+use crate::vtx_vfs::VtxVfsManager;
 use crate::web::{
     api::{admin, plugin, ws},
     middleware::auth::auth_middleware,
@@ -85,7 +85,7 @@ async fn main() -> anyhow::Result<()> {
     api::http_client::add_to_linker(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
-    let vfs = Arc::new(VfsManager::new()?);
+    let vfs = Arc::new(VtxVfsManager::new()?);
 
     let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(
         settings.vtx_ffmpeg.execution_timeout_secs,

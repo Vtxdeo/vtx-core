@@ -34,7 +34,7 @@ impl VideoRegistry {
 
     pub async fn scan_directory(
         &self,
-        vfs: &crate::vtx_vfs::VfsManager,
+        vfs: &crate::vtx_vfs::VtxVfsManager,
         root_uri: &str,
     ) -> anyhow::Result<Vec<VideoMeta>> {
         videos::scan_directory(&self.pool, vfs, root_uri).await
@@ -42,7 +42,7 @@ impl VideoRegistry {
 
     pub(crate) async fn scan_directory_with_abort<F>(
         &self,
-        vfs: &crate::vtx_vfs::VfsManager,
+        vfs: &crate::vtx_vfs::VtxVfsManager,
         root_uri: &str,
         should_continue: F,
     ) -> anyhow::Result<videos::ScanOutcome>

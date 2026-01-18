@@ -84,7 +84,7 @@ pub async fn scan_handler(
 fn validate_scan_path(
     requested: &str,
     allowed_roots: &[String],
-    vfs: &crate::vtx_vfs::VfsManager,
+    vfs: &crate::vtx_vfs::VtxVfsManager,
 ) -> Result<String, String> {
     let requested_uri = normalize_request_uri(vfs, requested, false)?;
     vfs.match_allowed_prefix(&requested_uri, allowed_roots)
@@ -163,7 +163,7 @@ pub async fn remove_scan_root_handler(
 }
 
 fn normalize_request_uri(
-    vfs: &crate::vtx_vfs::VfsManager,
+    vfs: &crate::vtx_vfs::VtxVfsManager,
     raw: &str,
     ensure_prefix: bool,
 ) -> Result<String, String> {
