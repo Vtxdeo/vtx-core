@@ -1,4 +1,5 @@
 use tempfile::tempdir;
+use url::Url;
 use vtx_core::storage::VideoRegistry;
 
 #[test]
@@ -9,12 +10,15 @@ fn add_list_remove_scan_root() {
 
     let root_dir = temp_dir.path().join("media");
     std::fs::create_dir_all(&root_dir).expect("create root");
+    let root_uri = Url::from_file_path(&root_dir)
+        .expect("root uri")
+        .to_string();
 
-    let resolved = registry.add_scan_root(&root_dir).expect("add");
+    let resolved = registry.add_scan_root(&root_uri).expect("add");
     let roots = registry.list_scan_roots().expect("list");
     assert_eq!(roots, vec![resolved.clone()]);
 
-    registry.remove_scan_root(&root_dir).expect("remove");
+    registry.remove_scan_root(&root_uri).expect("remove");
     let roots = registry.list_scan_roots().expect("list");
     assert!(roots.is_empty());
 }
@@ -27,9 +31,12 @@ fn add_scan_root_rejects_file_path() {
 
     let file_path = temp_dir.path().join("not-a-dir.txt");
     std::fs::write(&file_path, "x").expect("write file");
+    let file_uri = Url::from_file_path(&file_path)
+        .expect("file uri")
+        .to_string();
 
     let err = registry
-        .add_scan_root(&file_path)
+        .add_scan_root(&file_uri)
         .expect_err("expected error");
     assert!(err.to_string().contains("directory"));
 }

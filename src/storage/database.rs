@@ -115,6 +115,32 @@ pub(crate) fn initialize_pool(
                 updated_at TEXT DEFAULT CURRENT_TIMESTAMP
             );",
         ),
+        M::up(
+            "UPDATE videos
+             SET full_path = CASE
+                 WHEN full_path LIKE '%://%' THEN full_path
+                 WHEN substr(full_path, 2, 2) IN (':\\\\', ':/') THEN 'file:///' || replace(full_path, '\\\\', '/')
+                 WHEN substr(full_path, 1, 1) = '/' THEN 'file://' || full_path
+                 ELSE 'file://' || full_path
+             END
+             WHERE full_path NOT LIKE '%://%';
+             UPDATE sys_scan_roots
+             SET path = CASE
+                 WHEN path LIKE '%://%' THEN path
+                 WHEN substr(path, 2, 2) IN (':\\\\', ':/') THEN 'file:///' || replace(path, '\\\\', '/')
+                 WHEN substr(path, 1, 1) = '/' THEN 'file://' || path
+                 ELSE 'file://' || path
+             END
+             WHERE path NOT LIKE '%://%';
+             UPDATE sys_plugin_installations
+             SET file_path = CASE
+                 WHEN file_path LIKE '%://%' THEN file_path
+                 WHEN substr(file_path, 2, 2) IN (':\\\\', ':/') THEN 'file:///' || replace(file_path, '\\\\', '/')
+                 WHEN substr(file_path, 1, 1) = '/' THEN 'file://' || file_path
+                 ELSE 'file://' || file_path
+             END
+             WHERE file_path NOT LIKE '%://%';",
+        ),
     ]);
 
     if let Err(e) = migrations.to_latest(&mut conn) {

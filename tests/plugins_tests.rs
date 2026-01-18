@@ -1,5 +1,6 @@
 use rusqlite::params;
 use tempfile::tempdir;
+use url::Url;
 use vtx_core::runtime::manager::VtxPackageMetadata;
 use vtx_core::storage::VideoRegistry;
 
@@ -40,20 +41,26 @@ fn verify_installation_lock_and_release() {
     let plugin_b = temp_dir.path().join("plugin-b.vtx");
     std::fs::write(&plugin_a, "x").expect("write");
     std::fs::write(&plugin_b, "x").expect("write");
+    let plugin_a_uri = Url::from_file_path(&plugin_a)
+        .expect("plugin a uri")
+        .to_string();
+    let plugin_b_uri = Url::from_file_path(&plugin_b)
+        .expect("plugin b uri")
+        .to_string();
 
     assert!(registry
-        .verify_installation("plugin", &plugin_a)
+        .verify_installation("plugin", &plugin_a_uri)
         .expect("verify"));
     assert!(registry
-        .verify_installation("plugin", &plugin_a)
+        .verify_installation("plugin", &plugin_a_uri)
         .expect("verify"));
     assert!(!registry
-        .verify_installation("plugin", &plugin_b)
+        .verify_installation("plugin", &plugin_b_uri)
         .expect("verify"));
 
     registry.release_installation("plugin").expect("release");
     assert!(registry
-        .verify_installation("plugin", &plugin_b)
+        .verify_installation("plugin", &plugin_b_uri)
         .expect("verify"));
 }
 

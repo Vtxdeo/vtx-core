@@ -4,7 +4,7 @@ pub mod watcher;
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use tracing::{error, info, warn};
 use wasmtime::component::{Component, InstancePre, Linker};
@@ -12,12 +12,16 @@ use wasmtime::Engine;
 
 use crate::runtime::bus::EventBus;
 use crate::runtime::context::{SecurityPolicy, StreamContext, StreamContextConfig};
-use crate::runtime::executor::{EventDispatchContext, PluginExecutor};
+use crate::runtime::executor::{EventDispatchContext, VtxPluginExecutor};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
 use crate::runtime::host_impl::Plugin;
 use crate::storage::VideoRegistry;
+use crate::vtx_vfs::VtxVfsManager;
+use anyhow::Context;
+use futures_util::StreamExt;
+use url::Url;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct VtxAuthor {
@@ -50,10 +54,9 @@ pub struct PluginRuntime {
     pub instance_pre: InstancePre<StreamContext>,
     #[allow(dead_code)]
     pub component: Component,
-    pub source_path: PathBuf,
+    pub source_uri: String,
 }
 
-/// 插件状态视图
 #[derive(Serialize)]
 pub struct PluginStatus {
     pub id: String,
@@ -75,14 +78,15 @@ pub struct PluginPolicy {
 pub struct PluginManager {
     engine: Engine,
     linker: Linker<StreamContext>,
-    pub plugin_dir: PathBuf,
+    pub plugin_root: String,
     registry: VideoRegistry,
     plugins: Arc<RwLock<HashMap<String, Arc<PluginRuntime>>>>,
     routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
-    /// 鉴权提供者 ID
+
     auth_provider: Option<String>,
-    /// VtxFfmpeg 工具链管理器
+
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub vfs: Arc<VtxVfsManager>,
     max_buffer_read_bytes: u64,
     max_memory_bytes: usize,
     event_bus: Arc<EventBus>,
@@ -90,11 +94,12 @@ pub struct PluginManager {
 
 pub struct PluginManagerConfig {
     pub engine: Engine,
-    pub plugin_dir: PathBuf,
+    pub plugin_root: String,
     pub registry: VideoRegistry,
     pub linker: Linker<StreamContext>,
     pub auth_provider: Option<String>,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
+    pub vfs: Arc<VtxVfsManager>,
     pub max_buffer_read_bytes: u64,
     pub max_memory_bytes: usize,
     pub event_bus: Arc<EventBus>,
@@ -104,49 +109,44 @@ impl PluginManager {
     pub async fn new(config: PluginManagerConfig) -> anyhow::Result<Self> {
         let PluginManagerConfig {
             engine,
-            mut plugin_dir,
+            plugin_root,
             registry,
             linker,
             auth_provider,
             vtx_ffmpeg,
+            vfs,
             max_buffer_read_bytes,
             max_memory_bytes,
             event_bus,
         } = config;
-        if plugin_dir.is_file() {
-            warn!(
-                "[PluginManager] Configured path '{:?}' is a file, but a directory is expected.",
-                plugin_dir
-            );
-            if let Some(parent) = plugin_dir.parent() {
-                warn!(
-                    "[PluginManager] Automatically adjusting plugin directory to: {:?}",
-                    parent
-                );
-                plugin_dir = parent.to_path_buf();
-            } else {
-                return Err(anyhow::anyhow!("Invalid plugin directory path"));
-            }
-        }
 
+        let plugin_root = normalize_plugin_root(&vfs, &plugin_root)?;
         info!(
-            "[PluginManager] Initializing plugin manager at: {:?}",
-            plugin_dir
+            "[PluginManager] Initializing plugin manager at: {}",
+            plugin_root
         );
 
-        if !plugin_dir.exists() {
-            std::fs::create_dir_all(&plugin_dir)?;
+        if let Ok(url) = Url::parse(&plugin_root) {
+            if url.scheme() == "file" {
+                let path = url
+                    .to_file_path()
+                    .map_err(|_| anyhow::anyhow!("Invalid plugin root URI"))?;
+                if !path.exists() {
+                    std::fs::create_dir_all(&path)?;
+                }
+            }
         }
 
         let manager = Self {
             engine: engine.clone(),
             linker,
-            plugin_dir: plugin_dir.clone(),
+            plugin_root: plugin_root.clone(),
             registry,
             plugins: Arc::new(RwLock::new(HashMap::new())),
             routes: Arc::new(RwLock::new(Vec::new())),
             auth_provider,
             vtx_ffmpeg,
+            vfs,
             max_buffer_read_bytes,
             max_memory_bytes,
             event_bus,
@@ -154,7 +154,6 @@ impl PluginManager {
 
         manager.load_all_plugins().await?;
 
-        // 确保配置的 auth_provider 确实已加载，防止单点故障导致的系统裸奔或 500 错误
         if let Some(auth_id) = &manager.auth_provider {
             let plugins = manager.plugins.read().unwrap();
             if !plugins.contains_key(auth_id) {
@@ -162,7 +161,7 @@ impl PluginManager {
                     "[Fatal] Configured auth_provider '{}' not found in loaded plugins!",
                     auth_id
                 );
-                // 必须阻止启动，迫使管理员检查配置或插件文件
+
                 return Err(anyhow::anyhow!(
                     "Critical: Configured auth_provider '{}' is missing. Startup aborted.",
                     auth_id
@@ -177,23 +176,24 @@ impl PluginManager {
     }
 
     async fn load_all_plugins(&self) -> anyhow::Result<()> {
-        info!("[PluginManager] Scanning plugins in: {:?}", self.plugin_dir);
-        let entries = std::fs::read_dir(&self.plugin_dir).map_err(|e| {
-            anyhow::anyhow!(
-                "Failed to read plugin directory '{:?}': {}",
-                self.plugin_dir,
-                e
-            )
-        })?;
-
+        info!("[PluginManager] Scanning plugins in: {}", self.plugin_root);
+        let mut entries = self.vfs.list_objects(&self.plugin_root).await?;
         let mut loaded_count = 0;
+        let mut errors = 0usize;
 
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().is_some_and(|e| e == "vtx") {
-                match self.load_one(&path).await {
-                    Ok(_) => loaded_count += 1,
-                    Err(e) => error!("[PluginManager] Failed to load {}: {}", path.display(), e),
+        while let Some(item) = entries.next().await {
+            match item {
+                Ok(obj) => {
+                    if is_vtx_uri(&obj.uri) {
+                        match self.load_one(&obj.uri).await {
+                            Ok(_) => loaded_count += 1,
+                            Err(e) => error!("[PluginManager] Failed to load {}: {}", obj.uri, e),
+                        }
+                    }
+                }
+                Err(e) => {
+                    errors += 1;
+                    error!("[PluginManager] Failed to list plugin object: {}", e);
                 }
             }
         }
@@ -207,16 +207,26 @@ impl PluginManager {
             );
         }
 
+        if errors > 0 {
+            return Err(anyhow::anyhow!(
+                "Failed to list {} plugin objects under {}",
+                errors,
+                self.plugin_root
+            ));
+        }
+
         Ok(())
     }
 
-    pub async fn load_one(&self, path: &Path) -> anyhow::Result<()> {
+    pub async fn load_one(&self, uri: &str) -> anyhow::Result<()> {
+        let uri = self.vfs.normalize_uri(uri)?;
         let load_result = loader::load_and_migrate(
             &self.engine,
             &self.registry,
             &self.linker,
-            path,
+            &uri,
             self.vtx_ffmpeg.clone(),
+            self.vfs.clone(),
             self.event_bus.clone(),
         )
         .await?;
@@ -229,7 +239,7 @@ impl PluginManager {
             vtx_meta: load_result.vtx_meta.clone(),
             instance_pre,
             component: load_result.component,
-            source_path: path.to_path_buf(),
+            source_uri: uri,
         });
 
         self.register_plugin(runtime)
@@ -253,7 +263,6 @@ impl PluginManager {
             }
         }
 
-        // 原子替换：如果是 Modify 事件触发的重载，这里会直接覆盖旧的 Arc
         plugins_lock.insert(new_id.clone(), runtime.clone());
 
         routes_lock.retain(|p| p.id != *new_id);
@@ -277,6 +286,7 @@ impl PluginManager {
             let engine = self.engine.clone();
             let registry = self.registry.clone();
             let vtx_ffmpeg = self.vtx_ffmpeg.clone();
+            let vfs = self.vfs.clone();
             let max_buffer = self.max_buffer_read_bytes;
             let max_memory = self.max_memory_bytes;
 
@@ -288,11 +298,12 @@ impl PluginManager {
                     return;
                 };
                 while let Some(event) = rx.recv().await {
-                    if let Err(e) = PluginExecutor::dispatch_event_with(
+                    if let Err(e) = VtxPluginExecutor::dispatch_event_with(
                         EventDispatchContext {
                             engine: engine.clone(),
                             registry: registry.clone(),
                             vtx_ffmpeg: vtx_ffmpeg.clone(),
+                            vfs: vfs.clone(),
                             event_bus: bus.clone(),
                             max_memory_bytes: max_memory,
                             max_buffer_read_bytes: max_buffer,
@@ -325,20 +336,19 @@ impl PluginManager {
         None
     }
 
-    pub fn uninstall_by_path(&self, path: &Path) {
+    pub fn uninstall_by_uri(&self, uri: &str) {
         let target_id = {
             let plugins = self.plugins.read().unwrap();
             plugins
                 .values()
-                .find(|p| p.source_path == path)
+                .find(|p| p.source_uri == uri)
                 .map(|p| p.id.clone())
         };
 
         if let Some(id) = target_id {
             info!(
                 "[Watcher] Detected removal of '{}', uninstalling plugin '{}'...",
-                path.display(),
-                id
+                uri, id
             );
             if let Err(e) = self.uninstall(&id, true) {
                 error!("[Watcher] Failed to uninstall plugin '{}': {}", id, e);
@@ -347,7 +357,6 @@ impl PluginManager {
     }
 
     pub fn uninstall(&self, plugin_id: &str, keep_data: bool) -> anyhow::Result<()> {
-        // 禁止卸载核心鉴权插件。即使文件被删除，内存中也必须保留该插件。
         if let Some(auth_id) = &self.auth_provider {
             if auth_id == plugin_id {
                 warn!(
@@ -387,7 +396,6 @@ impl PluginManager {
         Ok(())
     }
 
-    /// 获取所有已加载插件的状态列表
     pub fn list_plugins(&self) -> Vec<PluginStatus> {
         let plugins = self.plugins.read().unwrap();
         plugins
@@ -397,7 +405,7 @@ impl PluginManager {
                 name: p.manifest.name.clone(),
                 version: p.manifest.version.clone(),
                 entrypoint: p.manifest.entrypoint.clone(),
-                source_path: p.source_path.to_string_lossy().to_string(),
+                source_path: p.source_uri.clone(),
                 vtx_meta: p.vtx_meta.clone(),
             })
             .collect()
@@ -412,7 +420,6 @@ impl PluginManager {
             .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
             .collect();
 
-        // 性能优化：O(1) 精确查找
         if let Some(provider_id) = &self.auth_provider {
             let runtime = {
                 let plugins = self.plugins.read().unwrap();
@@ -424,8 +431,6 @@ impl PluginManager {
                     Err(code) => return Err(code),
                 }
             } else {
-                // 理论上由 new() 和 uninstall() 的保护机制，此处不应到达
-                // 但为了防御性编程，保留此错误分支
                 error!(
                     "[Auth] Critical: auth_provider '{}' missing at runtime!",
                     provider_id
@@ -433,7 +438,6 @@ impl PluginManager {
                 return Err(500);
             }
         } else {
-            // 默认模式：责任链遍历
             let plugins: Vec<Arc<PluginRuntime>> =
                 { self.plugins.read().unwrap().values().cloned().collect() };
 
@@ -444,8 +448,7 @@ impl PluginManager {
                 {
                     Ok(user) => return Ok(user),
                     Err(code) => {
-                        // 401/403 表示该插件无法处理或拒绝，继续尝试下一个
-                        if code == 401 || code == 403 {
+                        if code == 401 {
                             continue;
                         }
                         return Err(code);
@@ -469,6 +472,7 @@ impl PluginManager {
         let ctx = StreamContext::new_secure(StreamContextConfig {
             registry: self.registry.clone(),
             vtx_ffmpeg: self.vtx_ffmpeg.clone(),
+            vfs: self.vfs.clone(),
             limiter: limits,
             policy: SecurityPolicy::Restricted,
             plugin_id: Some(runtime.id.clone()),
@@ -500,4 +504,54 @@ impl PluginManager {
                 500u16
             })?
     }
+}
+
+fn normalize_plugin_root(vfs: &VtxVfsManager, raw: &str) -> anyhow::Result<String> {
+    if raw.contains("://") {
+        let mut url = Url::parse(raw).context("Invalid plugin root URI")?;
+        if is_vtx_path(url.path()) {
+            if let Some(parent) = std::path::Path::new(url.path()).parent() {
+                let parent = parent.to_string_lossy().replace('\\', "/");
+                url.set_path(&parent);
+            }
+        }
+        return vfs.ensure_prefix_uri(url.as_str());
+    }
+
+    let mut root_path = PathBuf::from(raw);
+    if root_path
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("vtx"))
+        .unwrap_or(false)
+    {
+        if let Some(parent) = root_path.parent() {
+            root_path = parent.to_path_buf();
+        }
+    }
+
+    let root_path = if root_path.is_absolute() {
+        root_path
+    } else {
+        std::env::current_dir()?.join(root_path)
+    };
+    let uri = Url::from_file_path(&root_path)
+        .map_err(|_| anyhow::anyhow!("Invalid plugin root path: {}", root_path.display()))?
+        .to_string();
+    vfs.ensure_prefix_uri(&uri)
+}
+
+fn is_vtx_uri(uri: &str) -> bool {
+    let Ok(url) = Url::parse(uri) else {
+        return false;
+    };
+    is_vtx_path(url.path())
+}
+
+fn is_vtx_path(path: &str) -> bool {
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|s| s.to_str())
+        .map(|s| s.eq_ignore_ascii_case("vtx"))
+        .unwrap_or(false)
 }

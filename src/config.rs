@@ -30,7 +30,8 @@ pub struct DatabaseSettings {
 /// 插件配置（WASM 插件文件位置及运行时限制）
 #[derive(Debug, Deserialize, Clone)]
 pub struct PluginSettings {
-    pub location: PathBuf,
+    /// 插件根目录或 URI 前缀
+    pub location: String,
     /// 单个插件实例允许使用的最大内存（单位：MB），默认 100MB
     pub max_memory_mb: u64,
     /// 单次 buffer 读取的最大大小（单位：MB），默认 16MB
