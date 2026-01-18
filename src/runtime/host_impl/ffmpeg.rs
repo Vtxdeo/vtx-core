@@ -6,7 +6,6 @@ use std::process::Stdio;
 use url::Url;
 use wasmtime::component::Resource;
 
-#[async_trait::async_trait]
 impl api::ffmpeg::Host for StreamContext {
     async fn execute(
         &mut self,

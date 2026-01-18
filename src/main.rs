@@ -13,7 +13,8 @@ use std::io;
 use std::sync::Arc;
 use tower_http::{catch_panic::CatchPanicLayer, cors::CorsLayer, trace::TraceLayer};
 use tracing::info;
-use wasmtime::component::Linker;
+use wasmtime::component::{HasSelf, Linker};
+use wasmtime_wasi::p2::add_to_linker_async;
 
 use crate::config::Settings;
 use crate::runtime::{
@@ -62,11 +63,9 @@ async fn main() -> anyhow::Result<()> {
     let mut pooling_strategy = wasmtime::PoolingAllocationConfig::default();
 
     let max_memory_bytes = settings.plugins.max_memory_mb * 1024 * 1024;
-    let max_wasm_pages = max_memory_bytes / 65536;
-
     pooling_strategy.max_unused_warm_slots(16);
 
-    pooling_strategy.memory_pages(max_wasm_pages);
+    pooling_strategy.max_memory_size(max_memory_bytes as usize);
 
     pooling_strategy.total_component_instances(100);
 
@@ -76,13 +75,13 @@ async fn main() -> anyhow::Result<()> {
 
     let engine = wasmtime::Engine::new(&wasm_config)?;
     let mut linker = Linker::<runtime::context::StreamContext>::new(&engine);
-    wasmtime_wasi::add_to_linker_async(&mut linker)?;
-    api::stream_io::add_to_linker(&mut linker, |ctx| ctx)?;
-    api::sql::add_to_linker(&mut linker, |ctx| ctx)?;
-    api::ffmpeg::add_to_linker(&mut linker, |ctx| ctx)?;
-    api::context::add_to_linker(&mut linker, |ctx| ctx)?;
-    api::event_bus::add_to_linker(&mut linker, |ctx| ctx)?;
-    api::http_client::add_to_linker(&mut linker, |ctx| ctx)?;
+    add_to_linker_async(&mut linker)?;
+    api::stream_io::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::sql::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::ffmpeg::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::context::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::event_bus::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::http_client::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
     let vfs = Arc::new(VtxVfsManager::new()?);

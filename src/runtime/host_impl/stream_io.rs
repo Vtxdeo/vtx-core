@@ -7,7 +7,6 @@ use crate::runtime::context::{SecurityPolicy, StreamContext};
 use super::api;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-#[async_trait::async_trait]
 impl api::stream_io::Host for StreamContext {
     async fn open_file(&mut self, uuid: String) -> Result<Resource<RealBuffer>, String> {
         if self.policy == SecurityPolicy::Restricted {
@@ -61,7 +60,6 @@ impl api::stream_io::Host for StreamContext {
     }
 }
 
-#[async_trait::async_trait]
 impl api::stream_io::HostBuffer for StreamContext {
     async fn size(&mut self, resource: Resource<RealBuffer>) -> u64 {
         let rb = match self.table.get_mut(&resource) {
@@ -163,7 +161,7 @@ impl api::stream_io::HostBuffer for StreamContext {
         }
     }
 
-    fn drop(&mut self, resource: Resource<RealBuffer>) -> wasmtime::Result<()> {
+    async fn drop(&mut self, resource: Resource<RealBuffer>) -> wasmtime::Result<()> {
         self.table.delete(resource)?;
         Ok(())
     }

@@ -11,7 +11,6 @@ use crate::runtime::context::{SecurityPolicy, StreamContext};
 
 use super::api;
 
-#[async_trait::async_trait]
 impl api::http_client::Host for StreamContext {
     async fn request(
         &mut self,

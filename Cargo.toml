@@ -4,23 +4,19 @@ version = "0.1.5"
 edition = "2021"
 
 [dependencies]
-# Web 框架
-axum = { version = "0.7", features = ["ws"] }
+axum = { version = "0.8.8", features = ["ws"] }
 tokio = { version = "1", features = ["full"] }
-tower = { version = "0.4", features = ["util"] }
-tower-http = { version = "0.5", features = ["trace", "cors", "catch-panic"] }
+tower = { version = "0.5.3", features = ["util"] }
+tower-http = { version = "0.6.8", features = ["trace", "cors", "catch-panic"] }
 
-# Wasm 运行时
-wasmtime = { version = "21.0", features = ["component-model"] }
-wasmtime-wasi = "21.0"
+wasmtime = { version = "40.0.2", features = ["component-model"] }
+wasmtime-wasi = "40.0.2"
 
-# 数据库
-rusqlite = { version = "0.31", features = ["bundled"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.24"
-rusqlite_migration = "1.2"
+r2d2_sqlite = "0.31.0"
+rusqlite_migration = "2.3.0"
 
-# 工具
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 anyhow = "1.0"
@@ -29,11 +25,9 @@ tokio-util = { version = "0.7", features = ["io"] }
 regex = "1.10"
 mime_guess = "2.0"
 
-# 可观测性
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-# 配置管理
 config = "0.14"
 
 vtx-format = "0.1.6"
