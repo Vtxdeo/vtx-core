@@ -11,11 +11,11 @@ use crate::runtime::context::{SecurityPolicy, StreamContext};
 
 use super::api;
 
-impl api::http_client::Host for StreamContext {
+impl api::vtx_http_client::Host for StreamContext {
     async fn request(
         &mut self,
-        req: api::types::HttpClientRequest,
-    ) -> Result<api::types::HttpClientResponse, String> {
+        req: api::vtx_types::HttpClientRequest,
+    ) -> Result<api::vtx_types::HttpClientResponse, String> {
         if self.policy == SecurityPolicy::Restricted {
             return Err("Permission Denied".into());
         }
@@ -99,7 +99,7 @@ impl api::http_client::Host for StreamContext {
             )
         };
 
-        Ok(api::types::HttpClientResponse {
+        Ok(api::vtx_types::HttpClientResponse {
             status,
             headers,
             body,
@@ -108,11 +108,11 @@ impl api::http_client::Host for StreamContext {
 }
 
 fn match_allow_rule(
-    rules: &[api::types::HttpAllowRule],
+    rules: &[api::vtx_types::HttpAllowRule],
     url: &Url,
     method: &str,
     headers: &[(String, String)],
-) -> Option<api::types::HttpAllowRule> {
+) -> Option<api::vtx_types::HttpAllowRule> {
     for rule in rules {
         if !scheme_matches(rule, url) {
             continue;
@@ -137,12 +137,12 @@ fn match_allow_rule(
     None
 }
 
-fn scheme_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
+fn scheme_matches(rule: &api::vtx_types::HttpAllowRule, url: &Url) -> bool {
     let scheme = rule.scheme.to_ascii_lowercase();
     scheme == url.scheme().to_ascii_lowercase()
 }
 
-fn host_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
+fn host_matches(rule: &api::vtx_types::HttpAllowRule, url: &Url) -> bool {
     let host = match url.host_str() {
         Some(host) => host.to_ascii_lowercase(),
         None => return false,
@@ -150,7 +150,7 @@ fn host_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
     rule.host.to_ascii_lowercase() == host
 }
 
-fn port_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
+fn port_matches(rule: &api::vtx_types::HttpAllowRule, url: &Url) -> bool {
     let default_port = match url.scheme() {
         "https" => Some(443),
         "http" => Some(80),
@@ -163,7 +163,7 @@ fn port_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
     }
 }
 
-fn path_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
+fn path_matches(rule: &api::vtx_types::HttpAllowRule, url: &Url) -> bool {
     let path = url.path();
     match rule.path.as_deref() {
         None => true,
@@ -179,14 +179,14 @@ fn path_matches(rule: &api::types::HttpAllowRule, url: &Url) -> bool {
     }
 }
 
-fn method_matches(rule: &api::types::HttpAllowRule, method: &str) -> bool {
+fn method_matches(rule: &api::vtx_types::HttpAllowRule, method: &str) -> bool {
     match &rule.methods {
         None => true,
         Some(methods) => methods.iter().any(|m| m.to_ascii_uppercase() == method),
     }
 }
 
-fn headers_allowed(rule: &api::types::HttpAllowRule, headers: &[(String, String)]) -> bool {
+fn headers_allowed(rule: &api::vtx_types::HttpAllowRule, headers: &[(String, String)]) -> bool {
     let Some(allowed) = &rule.allow_headers else {
         return true;
     };
@@ -203,8 +203,8 @@ fn headers_allowed(rule: &api::types::HttpAllowRule, headers: &[(String, String)
 }
 
 fn build_redirect_policy(
-    rule: &api::types::HttpAllowRule,
-    rules: Vec<api::types::HttpAllowRule>,
+    rule: &api::vtx_types::HttpAllowRule,
+    rules: Vec<api::vtx_types::HttpAllowRule>,
 ) -> Policy {
     if rule.follow_redirects != Some(true) {
         return Policy::none();

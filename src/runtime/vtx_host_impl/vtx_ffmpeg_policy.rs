@@ -1,4 +1,4 @@
-use super::api::ffmpeg::FfmpegOption;
+use super::api::vtx_ffmpeg::FfmpegOption;
 
 pub fn validate_ffmpeg_options(options: &[FfmpegOption]) -> Result<(), String> {
     for option in options {

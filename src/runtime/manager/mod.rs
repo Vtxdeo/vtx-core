@@ -14,9 +14,9 @@ use crate::runtime::bus::EventBus;
 use crate::runtime::context::{SecurityPolicy, StreamContext, StreamContextConfig};
 use crate::runtime::executor::{EventDispatchContext, VtxPluginExecutor};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
-use crate::runtime::host_impl::api::auth_types::UserContext;
-use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
-use crate::runtime::host_impl::Plugin;
+use crate::runtime::vtx_host_impl::api::vtx_auth_types::UserContext;
+use crate::runtime::vtx_host_impl::api::vtx_types::{HttpAllowRule, Manifest};
+use crate::runtime::vtx_host_impl::VtxPlugin;
 use crate::storage::VideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use anyhow::Context;
@@ -494,7 +494,7 @@ impl PluginManager {
                 500u16
             })?;
 
-        let plugin = Plugin::new(&mut store, &instance).map_err(|_| 500u16)?;
+        let plugin = VtxPlugin::new(&mut store, &instance).map_err(|_| 500u16)?;
 
         plugin
             .call_authenticate(&mut store, headers)

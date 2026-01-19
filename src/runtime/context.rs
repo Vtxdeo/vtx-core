@@ -3,7 +3,7 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiVie
 
 use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
-use crate::runtime::host_impl::api::types::HttpAllowRule;
+use crate::runtime::vtx_host_impl::api::vtx_types::HttpAllowRule;
 use crate::storage::VideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 

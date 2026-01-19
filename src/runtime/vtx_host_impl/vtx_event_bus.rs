@@ -5,7 +5,7 @@ use crate::runtime::context::StreamContext;
 use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
-impl api::event_bus::Host for StreamContext {
+impl api::vtx_event_bus::Host for StreamContext {
     async fn publish_event(&mut self, topic: String, payload: String) -> Result<(), String> {
         const MAX_EVENT_PAYLOAD_BYTES: usize = 256 * 1024;
         const MAX_EVENT_JSON_DEPTH: usize = 20;

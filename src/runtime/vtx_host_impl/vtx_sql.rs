@@ -1,15 +1,15 @@
 use super::api;
 use crate::runtime::context::{SecurityPolicy, StreamContext};
-use crate::runtime::host_impl::sql_policy::enforce_sql_policy;
+use crate::runtime::vtx_host_impl::vtx_sql_policy::enforce_sql_policy;
 use rusqlite::types::ToSql;
 use rusqlite::ErrorCode;
 use serde_json::{Map, Value};
 
-impl api::sql::Host for StreamContext {
+impl api::vtx_sql::Host for StreamContext {
     async fn execute(
         &mut self,
         statement: String,
-        params: Vec<api::sql::DbValue>,
+        params: Vec<api::vtx_sql::DbValue>,
     ) -> Result<u64, String> {
         if self.policy == SecurityPolicy::Plugin
             && !self.permissions.iter().any(|p| p == "sql:write")
@@ -30,7 +30,7 @@ impl api::sql::Host for StreamContext {
     async fn query_json(
         &mut self,
         statement: String,
-        params: Vec<api::sql::DbValue>,
+        params: Vec<api::vtx_sql::DbValue>,
     ) -> Result<String, String> {
         let conn = self.registry.get_conn().map_err(|e| e.to_string())?;
         let _guard = enforce_sql_policy(self, &conn)?;
@@ -86,14 +86,14 @@ fn is_authorization_error(err: &rusqlite::Error) -> bool {
 }
 
 /// 工具函数：将插件传入的参数类型转换为 rusqlite 支持的 ToSql trait 对象
-fn convert_params(params: &[api::sql::DbValue]) -> Vec<Box<dyn ToSql>> {
+fn convert_params(params: &[api::vtx_sql::DbValue]) -> Vec<Box<dyn ToSql>> {
     params
         .iter()
         .map(|p| match p {
-            api::sql::DbValue::Text(s) => Box::new(s.clone()) as Box<dyn ToSql>,
-            api::sql::DbValue::Integer(i) => Box::new(*i),
-            api::sql::DbValue::Real(f) => Box::new(*f),
-            api::sql::DbValue::NullVal => Box::new(rusqlite::types::Null),
+            api::vtx_sql::DbValue::Text(s) => Box::new(s.clone()) as Box<dyn ToSql>,
+            api::vtx_sql::DbValue::Integer(i) => Box::new(*i),
+            api::vtx_sql::DbValue::Real(f) => Box::new(*f),
+            api::vtx_sql::DbValue::NullVal => Box::new(rusqlite::types::Null),
         })
         .collect()
 }

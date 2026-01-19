@@ -3,38 +3,12 @@ use wasmtime::component::Resource;
 
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
+use futures_util::StreamExt;
 
 use super::api;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-impl api::stream_io::Host for StreamContext {
-    async fn open_file(&mut self, uuid: String) -> Result<Resource<RealBuffer>, String> {
-        if self.policy == SecurityPolicy::Restricted {
-            tracing::warn!("[Security] Blocked file access: {}", uuid);
-            return Err("Permission Denied".into());
-        }
-        if self.policy == SecurityPolicy::Plugin && !self.has_permission("file:read") {
-            tracing::warn!("[Security] Missing file:read permission: {}", uuid);
-            return Err("Permission Denied".into());
-        }
-
-        let uri = self
-            .registry
-            .get_uri(&uuid)
-            .ok_or_else(|| "UUID not found".to_string())?;
-
-        let rb = RealBuffer {
-            inner: BufferType::Object { uri: uri.clone() },
-            uri_hint: Some(uri),
-            mime_override: None,
-            process_handle: None,
-        };
-
-        self.table
-            .push(rb)
-            .map_err(|e| format!("Resource Table Error: {}", e))
-    }
-
+impl api::vtx_vfs::Host for StreamContext {
     async fn create_memory_buffer(&mut self, data: Vec<u8>) -> Resource<RealBuffer> {
         if self.policy == SecurityPolicy::Plugin && !self.has_permission("buffer:create") {
             return self
@@ -58,9 +32,114 @@ impl api::stream_io::Host for StreamContext {
             .push(rb)
             .expect("Critical: Failed to allocate memory buffer in host table")
     }
+
+    async fn open_uri(&mut self, uri: String) -> Result<Resource<RealBuffer>, String> {
+        if self.policy == SecurityPolicy::Restricted {
+            tracing::warn!("[Security] Blocked vfs access: {}", uri);
+            return Err("Permission Denied".into());
+        }
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("file:read") {
+            tracing::warn!("[Security] Missing file:read permission: {}", uri);
+            return Err("Permission Denied".into());
+        }
+
+        let normalized = self.vfs.normalize_uri(&uri).map_err(|e| e.to_string())?;
+
+        let rb = RealBuffer {
+            inner: BufferType::Object {
+                uri: normalized.clone(),
+            },
+            uri_hint: Some(normalized),
+            mime_override: None,
+            process_handle: None,
+        };
+
+        self.table
+            .push(rb)
+            .map_err(|e| format!("Resource Table Error: {}", e))
+    }
+
+    async fn head(&mut self, uri: String) -> Result<api::vtx_vfs::VtxObjectMeta, String> {
+        if self.policy == SecurityPolicy::Restricted {
+            tracing::warn!("[Security] Blocked vfs access: {}", uri);
+            return Err("Permission Denied".into());
+        }
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("file:read") {
+            tracing::warn!("[Security] Missing file:read permission: {}", uri);
+            return Err("Permission Denied".into());
+        }
+
+        let normalized = self.vfs.normalize_uri(&uri).map_err(|e| e.to_string())?;
+        let meta = self
+            .vfs
+            .head(&normalized)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        Ok(api::vtx_vfs::VtxObjectMeta {
+            uri: meta.uri,
+            size: meta.size,
+            last_modified: meta.last_modified,
+            etag: meta.etag,
+        })
+    }
+
+    async fn list_objects(
+        &mut self,
+        prefix_uri: String,
+    ) -> Result<Vec<api::vtx_vfs::VtxObjectMeta>, String> {
+        if self.policy == SecurityPolicy::Restricted {
+            tracing::warn!("[Security] Blocked vfs access: {}", prefix_uri);
+            return Err("Permission Denied".into());
+        }
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("file:read") {
+            tracing::warn!("[Security] Missing file:read permission: {}", prefix_uri);
+            return Err("Permission Denied".into());
+        }
+
+        let normalized = self
+            .vfs
+            .ensure_prefix_uri(&prefix_uri)
+            .map_err(|e| e.to_string())?;
+        let mut stream = self
+            .vfs
+            .list_objects(&normalized)
+            .await
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        while let Some(item) = stream.next().await {
+            let meta = item.map_err(|e| e.to_string())?;
+            out.push(api::vtx_vfs::VtxObjectMeta {
+                uri: meta.uri,
+                size: meta.size,
+                last_modified: meta.last_modified,
+                etag: meta.etag,
+            });
+        }
+        Ok(out)
+    }
+
+    async fn read_range(&mut self, uri: String, offset: u64, len: u64) -> Result<Vec<u8>, String> {
+        if self.policy == SecurityPolicy::Restricted {
+            tracing::warn!("[Security] Blocked vfs access: {}", uri);
+            return Err("Permission Denied".into());
+        }
+        if self.policy == SecurityPolicy::Plugin && !self.has_permission("file:read") {
+            tracing::warn!("[Security] Missing file:read permission: {}", uri);
+            return Err("Permission Denied".into());
+        }
+
+        let normalized = self.vfs.normalize_uri(&uri).map_err(|e| e.to_string())?;
+        let bytes = self
+            .vfs
+            .read_range(&normalized, offset, len)
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(bytes.to_vec())
+    }
 }
 
-impl api::stream_io::HostBuffer for StreamContext {
+impl api::vtx_vfs::HostBuffer for StreamContext {
     async fn size(&mut self, resource: Resource<RealBuffer>) -> u64 {
         let rb = match self.table.get_mut(&resource) {
             Ok(b) => b,

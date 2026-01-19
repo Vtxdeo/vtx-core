@@ -283,7 +283,7 @@ async fn admin_list_plugins_empty() {
 async fn admin_jobs_flow() {
     let (state, _temp_dir) = make_state().await;
 
-    let user = vtx_core::runtime::host_impl::api::auth_types::UserContext {
+    let user = vtx_core::runtime::vtx_host_impl::api::vtx_auth_types::UserContext {
         user_id: "u1".to_string(),
         username: "tester".to_string(),
         groups: Vec::new(),
@@ -376,7 +376,7 @@ async fn admin_jobs_flow() {
 async fn admin_jobs_not_found_returns_error_code() {
     let (state, _temp_dir) = make_state().await;
 
-    let user = vtx_core::runtime::host_impl::api::auth_types::UserContext {
+    let user = vtx_core::runtime::vtx_host_impl::api::vtx_auth_types::UserContext {
         user_id: "u1".to_string(),
         username: "tester".to_string(),
         groups: Vec::new(),
@@ -553,7 +553,7 @@ async fn admin_scan_rejects_file_path() {
 async fn admin_jobs_rejects_missing_group() {
     let (state, _temp_dir) = make_state().await;
 
-    let user = vtx_core::runtime::host_impl::api::auth_types::UserContext {
+    let user = vtx_core::runtime::vtx_host_impl::api::vtx_auth_types::UserContext {
         user_id: "u1".to_string(),
         username: "tester".to_string(),
         groups: vec!["user".to_string()],

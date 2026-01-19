@@ -2,8 +2,8 @@ use crate::common::buffer::RealBuffer;
 use crate::runtime::bus::EventBus;
 use crate::runtime::context::{CurrentUser, SecurityPolicy, StreamContext, StreamContextConfig};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
-use crate::runtime::host_impl::{api, Plugin};
 use crate::runtime::manager::PluginRuntime;
+use crate::runtime::vtx_host_impl::{api, VtxPlugin};
 use crate::storage::VideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use crate::web::state::AppState;
@@ -70,16 +70,20 @@ impl VtxPluginExecutor {
     async fn instantiate_plugin(
         store: &mut Store<StreamContext>,
         instance_pre: &wasmtime::component::InstancePre<StreamContext>,
-    ) -> Result<Plugin, String> {
+    ) -> Result<VtxPlugin, String> {
         let instance = instance_pre
             .instantiate_async(&mut *store)
             .await
             .map_err(|e| format!("Fast instantiation failed: {}", e))?;
-        Plugin::new(store, &instance).map_err(|e| format!("Plugin binding failed: {}", e))
+        VtxPlugin::new(store, &instance).map_err(|e| format!("Plugin binding failed: {}", e))
     }
 
-    fn build_request(method: String, sub_path: String, query: String) -> api::types::HttpRequest {
-        api::types::HttpRequest {
+    fn build_request(
+        method: String,
+        sub_path: String,
+        query: String,
+    ) -> api::vtx_types::HttpRequest {
+        api::vtx_types::HttpRequest {
             method,
             path: sub_path,
             query,
@@ -88,7 +92,7 @@ impl VtxPluginExecutor {
 
     fn resolve_response(
         store: &mut Store<StreamContext>,
-        response: api::types::HttpResponse,
+        response: api::vtx_types::HttpResponse,
     ) -> Result<(Option<RealBuffer>, u16), String> {
         if let Some(resource_handle) = response.body {
             let buffer = store
@@ -201,18 +205,18 @@ impl VtxPluginExecutor {
             .await
             .map_err(|e| format!("Event instantiation failed: {}", e))?;
 
-        let plugin = Plugin::new(&mut store, &instance)
+        let plugin = VtxPlugin::new(&mut store, &instance)
             .map_err(|e| format!("Plugin binding failed: {}", e))?;
 
         let event_payload = serde_json::to_string(&event.payload)
             .map_err(|_| "Event payload serialize failed".to_string())?;
 
-        let wit_event = api::events::VtxEvent {
+        let wit_event = api::vtx_events::VtxEvent {
             id: event.id,
             topic: event.topic,
             source: event.source,
             payload: event_payload,
-            context: api::events::EventContext {
+            context: api::vtx_events::EventContext {
                 user_id: event.context.user_id,
                 username: event.context.username,
                 request_id: event.context.request_id,

@@ -1,15 +1,15 @@
 use super::api;
 use crate::common::buffer::{BufferType, RealBuffer};
 use crate::runtime::context::{SecurityPolicy, StreamContext};
-use crate::runtime::host_impl::ffmpeg_policy::validate_ffmpeg_options;
+use crate::runtime::vtx_host_impl::vtx_ffmpeg_policy::validate_ffmpeg_options;
 use std::process::Stdio;
 use url::Url;
 use wasmtime::component::Resource;
 
-impl api::ffmpeg::Host for StreamContext {
+impl api::vtx_ffmpeg::Host for StreamContext {
     async fn execute(
         &mut self,
-        params: api::ffmpeg::TranscodeProfile,
+        params: api::vtx_ffmpeg::TranscodeProfile,
     ) -> Result<Resource<RealBuffer>, String> {
         if self.policy == SecurityPolicy::Plugin && !self.has_permission("ffmpeg:execute") {
             return Err("Permission Denied".into());
@@ -100,7 +100,7 @@ impl api::ffmpeg::Host for StreamContext {
     }
 }
 
-fn build_ffmpeg_args(options: &[api::ffmpeg::FfmpegOption]) -> Result<Vec<String>, String> {
+fn build_ffmpeg_args(options: &[api::vtx_ffmpeg::FfmpegOption]) -> Result<Vec<String>, String> {
     let mut args = Vec::with_capacity(options.len() + 1);
 
     for option in options {

@@ -37,7 +37,7 @@ object_store = { version = "0.10", features = ["aws"] }
 async-stream = "0.3"
 
 [build-dependencies]
-vtx-protocol = "3.6.0"
+vtx-protocol = "5.0.0"
 
 [dev-dependencies]
 http-body-util = "0.1"

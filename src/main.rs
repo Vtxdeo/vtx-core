@@ -20,10 +20,10 @@ use crate::config::Settings;
 use crate::runtime::{
     bus::EventBus,
     ffmpeg::VtxFfmpegManager,
-    host_impl::api,
-    host_impl::ipc_transport::VtxIpcTransport,
     jobs,
     manager::{PluginManager, PluginManagerConfig},
+    vtx_host_impl::api,
+    vtx_host_impl::vtx_ipc_transport::VtxIpcTransport,
 };
 use crate::storage::VideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
@@ -44,7 +44,7 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(io::stderr)
         .init();
 
-    info!("[Startup] vtxdeo Core V0.1.3 initializing...");
+    info!("[Startup] vtxdeo Core V0.1.6 initializing...");
 
     let settings = Settings::new().expect("Failed to load config");
     info!(
@@ -76,12 +76,12 @@ async fn main() -> anyhow::Result<()> {
     let engine = wasmtime::Engine::new(&wasm_config)?;
     let mut linker = Linker::<runtime::context::StreamContext>::new(&engine);
     add_to_linker_async(&mut linker)?;
-    api::stream_io::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::sql::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::ffmpeg::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::context::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::event_bus::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::http_client::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_vfs::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_sql::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_ffmpeg::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_context::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_event_bus::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_http_client::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
 
     let registry = VideoRegistry::new(&settings.database.url, 120)?;
     let vfs = Arc::new(VtxVfsManager::new()?);
