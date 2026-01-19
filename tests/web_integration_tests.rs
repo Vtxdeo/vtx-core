@@ -26,7 +26,7 @@ use vtx_core::{
         ffmpeg::VtxFfmpegManager,
         manager::{PluginManager, PluginManagerConfig},
     },
-    storage::VideoRegistry,
+    storage::VtxVideoRegistry,
     vtx_vfs::VtxVfsManager,
     web::{
         api::{admin, ws},
@@ -64,7 +64,7 @@ fn file_uri(path: &Path) -> String {
 async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
     let ffmpeg_path = write_ffmpeg_stub(temp_dir.path());
     std::env::set_var("VTX_FFMPEG_BIN", &ffmpeg_path);

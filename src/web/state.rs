@@ -3,7 +3,7 @@ use crate::config::Settings;
 use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::manager::PluginManager;
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -12,7 +12,7 @@ use wasmtime::Engine;
 pub struct AppState {
     pub engine: Engine,
     pub plugin_manager: PluginManager,
-    pub registry: VideoRegistry,
+    pub registry: VtxVideoRegistry,
     pub config: Settings,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
     pub vfs: Arc<VtxVfsManager>,

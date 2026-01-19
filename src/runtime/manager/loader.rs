@@ -4,7 +4,7 @@ use crate::runtime::{
     manager::migration_policy,
     vtx_host_impl::VtxPlugin,
 };
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use anyhow::Context;
 use std::sync::Arc;
@@ -25,7 +25,7 @@ pub struct LoadResult {
 
 pub async fn load_and_migrate(
     engine: &Engine,
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     linker: &Linker<StreamContext>,
     vtx_uri: &str,
     vtx_ffmpeg: Arc<VtxFfmpegManager>,

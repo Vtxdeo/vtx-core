@@ -22,11 +22,11 @@ pub struct VideoMeta {
 }
 
 #[derive(Clone)]
-pub struct VideoRegistry {
+pub struct VtxVideoRegistry {
     pub(crate) pool: Pool<SqliteConnectionManager>,
 }
 
-impl VideoRegistry {
+impl VtxVideoRegistry {
     pub fn new(db_path: &str, max_connections: u32) -> anyhow::Result<Self> {
         let pool = database::initialize_pool(db_path, max_connections)?;
         Ok(Self { pool })

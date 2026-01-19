@@ -17,7 +17,7 @@ use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::vtx_host_impl::api::vtx_auth_types::UserContext;
 use crate::runtime::vtx_host_impl::api::vtx_types::{HttpAllowRule, Manifest};
 use crate::runtime::vtx_host_impl::VtxPlugin;
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -79,7 +79,7 @@ pub struct PluginManager {
     engine: Engine,
     linker: Linker<StreamContext>,
     pub plugin_root: String,
-    registry: VideoRegistry,
+    registry: VtxVideoRegistry,
     plugins: Arc<RwLock<HashMap<String, Arc<PluginRuntime>>>>,
     routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
 
@@ -95,7 +95,7 @@ pub struct PluginManager {
 pub struct PluginManagerConfig {
     pub engine: Engine,
     pub plugin_root: String,
-    pub registry: VideoRegistry,
+    pub registry: VtxVideoRegistry,
     pub linker: Linker<StreamContext>,
     pub auth_provider: Option<String>,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,

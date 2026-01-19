@@ -2,7 +2,7 @@ use crate::common::json_guard::check_json_limits;
 use crate::runtime::job_registry;
 use crate::storage::{
     videos::{ScanAbort, ScanOutcome},
-    VideoRegistry,
+    VtxVideoRegistry,
 };
 use crate::vtx_vfs::VtxVfsManager;
 use serde::Deserialize;
@@ -20,7 +20,7 @@ struct ScanDirectoryPayload {
 }
 
 pub(crate) fn handle_job(
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     vfs: Arc<VtxVfsManager>,
     job_id: &str,
     job_type: &str,
@@ -50,7 +50,7 @@ pub(crate) fn handle_job(
 }
 
 fn handle_scan_directory(
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     vfs: Arc<VtxVfsManager>,
     job_id: &str,
     payload: &serde_json::Value,

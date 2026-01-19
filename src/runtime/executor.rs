@@ -4,7 +4,7 @@ use crate::runtime::context::{CurrentUser, SecurityPolicy, StreamContext, Stream
 use crate::runtime::ffmpeg::VtxFfmpegManager;
 use crate::runtime::manager::PluginRuntime;
 use crate::runtime::vtx_host_impl::{api, VtxPlugin};
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use crate::web::state::AppState;
 use std::sync::Arc;
@@ -14,7 +14,7 @@ pub struct VtxPluginExecutor;
 
 pub struct EventDispatchContext {
     pub engine: wasmtime::Engine,
-    pub registry: VideoRegistry,
+    pub registry: VtxVideoRegistry,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
     pub vfs: Arc<VtxVfsManager>,
     pub event_bus: Arc<EventBus>,

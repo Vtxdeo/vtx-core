@@ -25,7 +25,7 @@ use crate::runtime::{
     vtx_host_impl::api,
     vtx_host_impl::vtx_ipc_transport::VtxIpcTransport,
 };
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use crate::web::{
     api::{admin, plugin, ws},
@@ -83,7 +83,7 @@ async fn main() -> anyhow::Result<()> {
     api::vtx_event_bus::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
     api::vtx_http_client::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
 
-    let registry = VideoRegistry::new(&settings.database.url, 120)?;
+    let registry = VtxVideoRegistry::new(&settings.database.url, 120)?;
     let vfs = Arc::new(VtxVfsManager::new()?);
 
     let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(

@@ -1,10 +1,10 @@
 use tempfile::tempdir;
-use vtx_core::storage::VideoRegistry;
+use vtx_core::storage::VtxVideoRegistry;
 
-fn make_registry() -> (tempfile::TempDir, VideoRegistry) {
+fn make_registry() -> (tempfile::TempDir, VtxVideoRegistry) {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
     (temp_dir, registry)
 }
 

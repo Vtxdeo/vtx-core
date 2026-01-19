@@ -2,12 +2,12 @@ use rusqlite::params;
 use tempfile::tempdir;
 use url::Url;
 use vtx_core::runtime::manager::VtxPackageMetadata;
-use vtx_core::storage::VideoRegistry;
+use vtx_core::storage::VtxVideoRegistry;
 
-fn make_registry() -> (tempfile::TempDir, VideoRegistry) {
+fn make_registry() -> (tempfile::TempDir, VtxVideoRegistry) {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
     (temp_dir, registry)
 }
 
@@ -35,7 +35,7 @@ fn register_and_list_resources() {
 fn verify_installation_lock_and_release() {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
     let plugin_a = temp_dir.path().join("plugin-a.vtx");
     let plugin_b = temp_dir.path().join("plugin-b.vtx");
