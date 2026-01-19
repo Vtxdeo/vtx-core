@@ -11,7 +11,11 @@ mod worker;
 use adaptive::{spawn_adaptive_controller, AdaptiveScanLimiter};
 use worker::{run_once, spawn_worker, WorkerState, WorkerTick};
 
-pub fn spawn_workers(registry: VtxVideoRegistry, vfs: Arc<VtxVfsManager>, settings: JobQueueSettings) {
+pub fn spawn_workers(
+    registry: VtxVideoRegistry,
+    vfs: Arc<VtxVfsManager>,
+    settings: JobQueueSettings,
+) {
     let workers = std::cmp::max(1, settings.max_concurrent) as usize;
     let adaptive_settings = settings.adaptive_scan.clone();
     let scan_limiter = if adaptive_settings.enabled {
