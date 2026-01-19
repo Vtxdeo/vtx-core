@@ -8,9 +8,9 @@ use crate::common::events::SystemRequest;
 use crate::common::ipc::{DependencyPayload, IpcEnvelope, StatusPayload, SystemPayload};
 use crate::common::json_guard::check_json_limits;
 
-pub struct IpcTransport;
+pub struct VtxIpcTransport;
 
-impl IpcTransport {
+impl VtxIpcTransport {
     pub fn spawn(mut rx_outbound: mpsc::Receiver<SystemRequest>) {
         tokio::spawn(async move {
             let mut stdout = io::stdout();

@@ -21,7 +21,7 @@ use crate::runtime::{
     bus::EventBus,
     ffmpeg::VtxFfmpegManager,
     host_impl::api,
-    host_impl::ipc_transport::IpcTransport,
+    host_impl::ipc_transport::VtxIpcTransport,
     jobs,
     manager::{PluginManager, PluginManagerConfig},
 };
@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
 
     let event_bus = Arc::new(EventBus::new(256));
     let (ipc_outbound_tx, ipc_outbound_rx) = tokio::sync::mpsc::channel(100);
-    IpcTransport::spawn(ipc_outbound_rx);
+    VtxIpcTransport::spawn(ipc_outbound_rx);
 
     let plugin_manager = PluginManager::new(PluginManagerConfig {
         engine: engine.clone(),
