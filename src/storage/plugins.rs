@@ -8,12 +8,13 @@ use crate::runtime::manager::VtxPackageMetadata;
 /// 获取插件版本
 pub(crate) fn get_plugin_version(pool: &Pool<SqliteConnectionManager>, plugin_name: &str) -> usize {
     let Ok(conn) = pool.get() else { return 0 };
-    let version: i64 = conn.query_row(
-        "SELECT version FROM sys_plugin_versions WHERE plugin_name = ?1",
-        [plugin_name],
-        |row| row.get(0),
-    )
-    .unwrap_or(0);
+    let version: i64 = conn
+        .query_row(
+            "SELECT version FROM sys_plugin_versions WHERE plugin_name = ?1",
+            [plugin_name],
+            |row| row.get(0),
+        )
+        .unwrap_or(0);
     usize::try_from(version).unwrap_or(0)
 }
 
