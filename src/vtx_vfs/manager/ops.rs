@@ -4,7 +4,7 @@ use anyhow::Context;
 use bytes::Bytes;
 use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
-use object_store::{GetOptions, GetRange, ObjectMeta};
+use object_store::{GetOptions, GetRange, ObjectMeta, ObjectStoreExt, Result as ObjectStoreResult};
 
 use super::super::entry::VtxVfsStoreEntry;
 use super::super::utils::to_range;
@@ -75,19 +75,19 @@ impl VtxVfsManager {
             .context("URI must point to an object")?;
         let store = resolved.entry.store.clone();
 
-        let stream = if let Some(range) = range {
+        let stream: BoxStream<'static, ObjectStoreResult<Bytes>> = if let Some(range) = range {
             let mut options = GetOptions::default();
             let start = *range.start();
             let end = *range.end();
             options.range = Some(GetRange::Bounded(to_range(start, end)?));
             let result = store.get_opts(&location, options).await?;
-            result.into_stream()
+            Box::pin(result.into_stream())
         } else {
             let result = store.get(&location).await?;
-            result.into_stream()
+            Box::pin(result.into_stream())
         };
 
-        let mapped = stream.map(|item| match item {
+        let mapped = stream.map(|item: ObjectStoreResult<Bytes>| match item {
             Ok(bytes) => Ok(bytes),
             Err(err) => Err(std::io::Error::other(err.to_string())),
         });

@@ -12,7 +12,8 @@ pub struct AuthorizerGuard<'a> {
 impl Drop for AuthorizerGuard<'_> {
     fn drop(&mut self) {
         if self.active {
-            self.conn
+            let _ = self
+                .conn
                 .authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
         }
     }
@@ -23,7 +24,7 @@ pub fn enforce_sql_policy<'a>(
     conn: &'a Connection,
 ) -> Result<AuthorizerGuard<'a>, String> {
     if ctx.policy == SecurityPolicy::Root {
-        conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
+        let _ = conn.authorizer(None::<fn(AuthContext<'_>) -> Authorization>);
         return Ok(AuthorizerGuard {
             conn,
             active: false,
@@ -56,7 +57,7 @@ pub fn enforce_sql_policy<'a>(
     });
 
     let hook_config = Arc::clone(&config);
-    conn.authorizer(Some(move |auth_ctx: AuthContext<'_>| {
+    let _ = conn.authorizer(Some(move |auth_ctx: AuthContext<'_>| {
         authorize_action(auth_ctx, &hook_config)
     }));
 

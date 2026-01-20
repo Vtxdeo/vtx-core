@@ -11,9 +11,9 @@ tower-http = { version = "0.6.8", features = ["trace", "cors", "catch-panic"] }
 wasmtime = { version = "40.0.2", features = ["component-model"] }
 wasmtime-wasi = "40.0.2"
 
-rusqlite = { version = "0.37", features = ["bundled", "hooks"] }
+rusqlite = { version = "0.38", features = ["bundled", "hooks"] }
 r2d2 = "0.8"
-r2d2_sqlite = "0.31.0"
+r2d2_sqlite = "0.32.0"
 rusqlite_migration = "2.3.0"
 
 serde = { version = "1.0", features = ["derive"] }
@@ -25,7 +25,7 @@ tokio-util = { version = "0.7", features = ["io", "codec"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
-config = "0.14"
+config = "0.15.19"
 
 vtx-format = "0.1.6"
 vtx-protocol = "5.0.0"
@@ -33,7 +33,7 @@ futures-util = "0.3.31"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 url = "2"
 bytes = "1"
-object_store = { version = "0.10", features = ["aws"] }
+object_store = { version = "0.13.1", features = ["aws"] }
 async-stream = "0.3"
 
 [build-dependencies]

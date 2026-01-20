@@ -8,12 +8,13 @@ use crate::runtime::manager::VtxPackageMetadata;
 /// 获取插件版本
 pub(crate) fn get_plugin_version(pool: &Pool<SqliteConnectionManager>, plugin_name: &str) -> usize {
     let Ok(conn) = pool.get() else { return 0 };
-    conn.query_row(
+    let version: i64 = conn.query_row(
         "SELECT version FROM sys_plugin_versions WHERE plugin_name = ?1",
         [plugin_name],
         |row| row.get(0),
     )
-    .unwrap_or(0)
+    .unwrap_or(0);
+    usize::try_from(version).unwrap_or(0)
 }
 
 /// 更新插件版本 (幂等)
@@ -23,13 +24,14 @@ pub(crate) fn set_plugin_version(
     new_version: usize,
 ) {
     if let Ok(conn) = pool.get() {
+        let version = i64::try_from(new_version).unwrap_or(i64::MAX);
         let _ = conn
             .execute(
                 "INSERT INTO sys_plugin_versions (plugin_name, version)
              VALUES (?1, ?2)
              ON CONFLICT(plugin_name) DO UPDATE
              SET version = ?2, updated_at = CURRENT_TIMESTAMP",
-                params![plugin_name, new_version],
+                params![plugin_name, version],
             )
             .map_err(|e| error!("[Database] Failed to set plugin version: {}", e));
     }
