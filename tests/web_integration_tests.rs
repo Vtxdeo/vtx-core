@@ -39,7 +39,10 @@ fn write_ffmpeg_stub(dir: &Path) -> PathBuf {
     let (name, contents) = if cfg!(windows) {
         ("ffmpeg.cmd", "@echo off\r\necho ffmpeg version 1.0\r\n")
     } else {
-        ("ffmpeg", "#!/bin/sh\necho ffmpeg version 1.0\n")
+        (
+            "ffmpeg",
+            "#!/bin/sh\nprintf 'ffmpeg version 1.0\\n'\nexit 0\n",
+        )
     };
     let path = dir.join(name);
     std::fs::write(&path, contents).expect("ffmpeg stub");
