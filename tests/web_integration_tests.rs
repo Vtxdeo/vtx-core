@@ -19,7 +19,7 @@ use url::Url;
 use uuid::Uuid;
 use vtx_core::{
     common::events::{EventContext, VtxEvent},
-    config::Settings,
+    config::VtxSettings,
     runtime::{
         bus::EventBus,
         context::StreamContext,
@@ -99,7 +99,7 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     .await
     .expect("plugin_manager");
 
-    let config = Settings::new().expect("settings");
+    let config = VtxSettings::new().expect("settings");
     let state = Arc::new(AppState {
         engine,
         plugin_manager,

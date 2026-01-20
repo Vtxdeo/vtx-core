@@ -16,7 +16,7 @@ use tracing::info;
 use wasmtime::component::{HasSelf, Linker};
 use wasmtime_wasi::p2::add_to_linker_async;
 
-use crate::config::Settings;
+use crate::config::VtxSettings;
 use crate::runtime::{
     bus::EventBus,
     ffmpeg::VtxFfmpegManager,
@@ -46,7 +46,7 @@ async fn main() -> anyhow::Result<()> {
 
     info!("[Startup] vtxdeo Core V0.1.6 initializing...");
 
-    let settings = Settings::new().expect("Failed to load config");
+    let settings = VtxSettings::new().expect("Failed to load config");
     info!(
         "[Config] Binding at {}:{}",
         settings.server.host, settings.server.port
