@@ -70,7 +70,6 @@ pub(super) fn to_range(start: u64, end: u64) -> anyhow::Result<std::ops::Range<u
     if end < start {
         return Err(anyhow::anyhow!("Invalid range"));
     }
-    let start = start;
     let end = end.saturating_add(1);
     Ok(start..end)
 }

@@ -37,7 +37,7 @@ impl VtxVfsManager {
                 let uri = entry.clone().to_uri(&meta.location)?;
                 yield VfsObject {
                     uri,
-                    size: meta.size as u64,
+                    size: meta.size,
                     last_modified: Some(meta.last_modified.timestamp()),
                     etag: meta.e_tag.clone(),
                 };
@@ -102,7 +102,7 @@ impl VtxVfsManager {
         let uri = entry.to_uri(&meta.location)?;
         Ok(VfsObject {
             uri,
-            size: meta.size as u64,
+            size: meta.size,
             last_modified: Some(meta.last_modified.timestamp()),
             etag: meta.e_tag.clone(),
         })
