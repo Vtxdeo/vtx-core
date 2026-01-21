@@ -24,17 +24,17 @@ impl EventBus {
         plugin_id: &str,
         topics: &[String],
         allowed_topics: &[String],
-    ) -> Option<mpsc::Receiver<VtxEvent>> {
-        let mut receiver = None;
+    ) -> mpsc::Receiver<VtxEvent> {
+        let (tx, rx) = mpsc::channel(self.queue_capacity);
         let mut queues = self.queues.write().await;
-        if !queues.contains_key(plugin_id) {
-            let (tx, rx) = mpsc::channel(self.queue_capacity);
-            queues.insert(plugin_id.to_string(), tx);
-            receiver = Some(rx);
-        }
+        queues.remove(plugin_id);
+        queues.insert(plugin_id.to_string(), tx);
         drop(queues);
 
         let mut subs = self.subscriptions.write().await;
+        for ids in subs.values_mut() {
+            ids.retain(|id| id != plugin_id);
+        }
         let allowed: std::collections::HashSet<String> =
             allowed_topics.iter().map(|t| t.to_string()).collect();
         for topic in topics {
@@ -47,7 +47,7 @@ impl EventBus {
                 entry.push(plugin_id.to_string());
             }
         }
-        receiver
+        rx
     }
 
     pub async fn unregister_plugin(&self, plugin_id: &str) {

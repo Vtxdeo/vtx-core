@@ -46,12 +46,9 @@ fn parse_topics(raw: Option<String>) -> Vec<String> {
 async fn handle_socket(mut socket: WebSocket, event_bus: Arc<EventBus>, topics: Vec<String>) {
     let client_id = format!("ws-{}", Uuid::new_v4());
     let allowed_topics = topics.clone();
-    let Some(mut rx) = event_bus
+    let mut rx = event_bus
         .register_plugin(&client_id, &topics, &allowed_topics)
-        .await
-    else {
-        return;
-    };
+        .await;
 
     loop {
         tokio::select! {

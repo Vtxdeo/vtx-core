@@ -291,12 +291,9 @@ impl PluginManager {
             let max_memory = self.max_memory_bytes;
 
             tokio::spawn(async move {
-                let Some(mut rx) = bus
+                let mut rx = bus
                     .register_plugin(&runtime.id, &topics, &runtime.policy.subscriptions)
-                    .await
-                else {
-                    return;
-                };
+                    .await;
                 while let Some(event) = rx.recv().await {
                     if let Err(e) = VtxPluginExecutor::dispatch_event_with(
                         EventDispatchContext {
