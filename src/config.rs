@@ -4,7 +4,7 @@ use std::path::PathBuf;
 
 /// 应用配置总结构
 #[derive(Debug, Deserialize, Clone)]
-pub struct Settings {
+pub struct VtxSettings {
     pub server: ServerSettings,
     pub database: DatabaseSettings,
     pub plugins: PluginSettings,
@@ -97,7 +97,7 @@ impl Default for AdaptiveScanSettings {
     }
 }
 
-impl Settings {
+impl VtxSettings {
     /// 加载配置：支持默认值、可选配置文件、环境变量覆盖
     pub fn new() -> anyhow::Result<Self> {
         let builder = Config::builder()

@@ -19,14 +19,14 @@ use url::Url;
 use uuid::Uuid;
 use vtx_core::{
     common::events::{EventContext, VtxEvent},
-    config::Settings,
+    config::VtxSettings,
     runtime::{
         bus::EventBus,
         context::StreamContext,
         ffmpeg::VtxFfmpegManager,
         manager::{PluginManager, PluginManagerConfig},
     },
-    storage::VideoRegistry,
+    storage::VtxVideoRegistry,
     vtx_vfs::VtxVfsManager,
     web::{
         api::{admin, ws},
@@ -39,7 +39,10 @@ fn write_ffmpeg_stub(dir: &Path) -> PathBuf {
     let (name, contents) = if cfg!(windows) {
         ("ffmpeg.cmd", "@echo off\r\necho ffmpeg version 1.0\r\n")
     } else {
-        ("ffmpeg", "#!/bin/sh\necho ffmpeg version 1.0\n")
+        (
+            "ffmpeg",
+            "#!/bin/sh\nprintf 'ffmpeg version 1.0\\n'\nexit 0\n",
+        )
     };
     let path = dir.join(name);
     std::fs::write(&path, contents).expect("ffmpeg stub");
@@ -64,7 +67,7 @@ fn file_uri(path: &Path) -> String {
 async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
     let ffmpeg_path = write_ffmpeg_stub(temp_dir.path());
     std::env::set_var("VTX_FFMPEG_BIN", &ffmpeg_path);
@@ -99,7 +102,7 @@ async fn make_state() -> (Arc<AppState>, tempfile::TempDir) {
     .await
     .expect("plugin_manager");
 
-    let config = Settings::new().expect("settings");
+    let config = VtxSettings::new().expect("settings");
     let state = Arc::new(AppState {
         engine,
         plugin_manager,
@@ -283,7 +286,7 @@ async fn admin_list_plugins_empty() {
 async fn admin_jobs_flow() {
     let (state, _temp_dir) = make_state().await;
 
-    let user = vtx_core::runtime::host_impl::api::auth_types::UserContext {
+    let user = vtx_core::runtime::vtx_host_impl::api::vtx_auth_types::UserContext {
         user_id: "u1".to_string(),
         username: "tester".to_string(),
         groups: Vec::new(),
@@ -376,7 +379,7 @@ async fn admin_jobs_flow() {
 async fn admin_jobs_not_found_returns_error_code() {
     let (state, _temp_dir) = make_state().await;
 
-    let user = vtx_core::runtime::host_impl::api::auth_types::UserContext {
+    let user = vtx_core::runtime::vtx_host_impl::api::vtx_auth_types::UserContext {
         user_id: "u1".to_string(),
         username: "tester".to_string(),
         groups: Vec::new(),
@@ -553,7 +556,7 @@ async fn admin_scan_rejects_file_path() {
 async fn admin_jobs_rejects_missing_group() {
     let (state, _temp_dir) = make_state().await;
 
-    let user = vtx_core::runtime::host_impl::api::auth_types::UserContext {
+    let user = vtx_core::runtime::vtx_host_impl::api::vtx_auth_types::UserContext {
         user_id: "u1".to_string(),
         username: "tester".to_string(),
         groups: vec!["user".to_string()],

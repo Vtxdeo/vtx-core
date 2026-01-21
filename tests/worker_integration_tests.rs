@@ -1,7 +1,7 @@
 use tempfile::tempdir;
 use vtx_core::config::{AdaptiveScanSettings, JobQueueSettings};
 use vtx_core::runtime::jobs::run_worker_once_for_tests;
-use vtx_core::storage::VideoRegistry;
+use vtx_core::storage::VtxVideoRegistry;
 use vtx_core::vtx_vfs::VtxVfsManager;
 
 fn test_settings() -> JobQueueSettings {
@@ -20,7 +20,7 @@ fn test_settings() -> JobQueueSettings {
 async fn worker_processes_noop_job() {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
     let vfs = VtxVfsManager::new().expect("vfs");
 
     let job_id = registry.enqueue_job("noop", "{}", 1, 0).expect("enqueue");
@@ -42,7 +42,7 @@ async fn worker_processes_noop_job() {
 async fn worker_fails_unsupported_job_type() {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
     let vfs = VtxVfsManager::new().expect("vfs");
 
     let job_id = registry.enqueue_job("bogus", "{}", 1, 0).expect("enqueue");

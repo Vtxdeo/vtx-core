@@ -1,10 +1,10 @@
 use crate::runtime::{
     context::{SecurityPolicy, StreamContext, StreamContextConfig},
     ffmpeg::VtxFfmpegManager,
-    host_impl::Plugin,
     manager::migration_policy,
+    vtx_host_impl::VtxPlugin,
 };
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use anyhow::Context;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ use wasmtime::{
 
 pub struct LoadResult {
     pub plugin_id: String,
-    pub manifest: crate::runtime::host_impl::api::types::Manifest,
+    pub manifest: crate::runtime::vtx_host_impl::api::vtx_types::Manifest,
     pub policy: super::PluginPolicy,
     pub vtx_meta: Option<super::VtxPackageMetadata>,
     pub component: Component,
@@ -25,7 +25,7 @@ pub struct LoadResult {
 
 pub async fn load_and_migrate(
     engine: &Engine,
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     linker: &Linker<StreamContext>,
     vtx_uri: &str,
     vtx_ffmpeg: Arc<VtxFfmpegManager>,
@@ -52,7 +52,7 @@ pub async fn load_and_migrate(
     let mut store = wasmtime::Store::new(engine, ctx);
 
     let instance = linker.instantiate_async(&mut store, &component).await?;
-    let plugin = Plugin::new(&mut store, &instance)?;
+    let plugin = VtxPlugin::new(&mut store, &instance)?;
 
     let manifest = plugin.call_get_manifest(&mut store).await?;
     let plugin_id = manifest.id.clone();

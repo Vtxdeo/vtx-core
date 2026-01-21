@@ -1,6 +1,6 @@
 use crate::config::JobQueueSettings;
 use crate::storage::jobs::JobRecord;
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
@@ -35,7 +35,7 @@ pub(crate) enum WorkerTick {
 
 pub(crate) fn spawn_worker(
     worker_id: String,
-    registry: VideoRegistry,
+    registry: VtxVideoRegistry,
     vfs: Arc<VtxVfsManager>,
     scan_limiter: Option<Arc<AdaptiveScanLimiter>>,
     settings: JobQueueSettings,
@@ -63,7 +63,7 @@ pub(crate) fn spawn_worker(
 pub(crate) async fn run_once(
     state: &mut WorkerState,
     worker_id: &str,
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     vfs: Arc<VtxVfsManager>,
     scan_limiter: Option<Arc<AdaptiveScanLimiter>>,
     settings: &JobQueueSettings,
@@ -117,7 +117,7 @@ pub(crate) async fn run_once(
 
 async fn maybe_sweep(
     state: &mut WorkerState,
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     timeout_secs: u64,
     sweep_interval_ms: u64,
 ) {
@@ -142,7 +142,7 @@ async fn maybe_sweep(
 
 async fn maybe_reclaim(
     state: &mut WorkerState,
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     reclaim_interval_ms: u64,
 ) {
     let reclaim_interval = Duration::from_millis(reclaim_interval_ms);
@@ -167,7 +167,7 @@ async fn maybe_reclaim(
 async fn process_job(
     job: JobRecord,
     worker_id: String,
-    registry: VideoRegistry,
+    registry: VtxVideoRegistry,
     vfs: Arc<VtxVfsManager>,
     scan_limiter: Option<Arc<AdaptiveScanLimiter>>,
     lease_secs: u64,

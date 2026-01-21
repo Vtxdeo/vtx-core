@@ -1,5 +1,5 @@
 use crate::config::JobQueueSettings;
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use std::sync::Arc;
 use tracing::{error, warn};
@@ -11,7 +11,11 @@ mod worker;
 use adaptive::{spawn_adaptive_controller, AdaptiveScanLimiter};
 use worker::{run_once, spawn_worker, WorkerState, WorkerTick};
 
-pub fn spawn_workers(registry: VideoRegistry, vfs: Arc<VtxVfsManager>, settings: JobQueueSettings) {
+pub fn spawn_workers(
+    registry: VtxVideoRegistry,
+    vfs: Arc<VtxVfsManager>,
+    settings: JobQueueSettings,
+) {
     let workers = std::cmp::max(1, settings.max_concurrent) as usize;
     let adaptive_settings = settings.adaptive_scan.clone();
     let scan_limiter = if adaptive_settings.enabled {
@@ -40,7 +44,7 @@ pub fn spawn_workers(registry: VideoRegistry, vfs: Arc<VtxVfsManager>, settings:
     }
 }
 
-pub async fn recover_startup(registry: VideoRegistry, settings: JobQueueSettings) {
+pub async fn recover_startup(registry: VtxVideoRegistry, settings: JobQueueSettings) {
     let timeout_secs = settings.timeout_secs;
     let lease_reclaim = tokio::task::spawn_blocking({
         let registry = registry.clone();
@@ -74,7 +78,7 @@ pub async fn recover_startup(registry: VideoRegistry, settings: JobQueueSettings
 #[allow(dead_code)]
 pub async fn run_worker_once_for_tests(
     worker_id: &str,
-    registry: &VideoRegistry,
+    registry: &VtxVideoRegistry,
     vfs: Arc<VtxVfsManager>,
     settings: &JobQueueSettings,
 ) -> bool {

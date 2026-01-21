@@ -14,10 +14,10 @@ use crate::runtime::bus::EventBus;
 use crate::runtime::context::{SecurityPolicy, StreamContext, StreamContextConfig};
 use crate::runtime::executor::{EventDispatchContext, VtxPluginExecutor};
 use crate::runtime::ffmpeg::VtxFfmpegManager;
-use crate::runtime::host_impl::api::auth_types::UserContext;
-use crate::runtime::host_impl::api::types::{HttpAllowRule, Manifest};
-use crate::runtime::host_impl::Plugin;
-use crate::storage::VideoRegistry;
+use crate::runtime::vtx_host_impl::api::vtx_auth_types::UserContext;
+use crate::runtime::vtx_host_impl::api::vtx_types::{HttpAllowRule, Manifest};
+use crate::runtime::vtx_host_impl::VtxPlugin;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use anyhow::Context;
 use futures_util::StreamExt;
@@ -79,7 +79,7 @@ pub struct PluginManager {
     engine: Engine,
     linker: Linker<StreamContext>,
     pub plugin_root: String,
-    registry: VideoRegistry,
+    registry: VtxVideoRegistry,
     plugins: Arc<RwLock<HashMap<String, Arc<PluginRuntime>>>>,
     routes: Arc<RwLock<Vec<Arc<PluginRuntime>>>>,
 
@@ -95,7 +95,7 @@ pub struct PluginManager {
 pub struct PluginManagerConfig {
     pub engine: Engine,
     pub plugin_root: String,
-    pub registry: VideoRegistry,
+    pub registry: VtxVideoRegistry,
     pub linker: Linker<StreamContext>,
     pub auth_provider: Option<String>,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
@@ -291,12 +291,9 @@ impl PluginManager {
             let max_memory = self.max_memory_bytes;
 
             tokio::spawn(async move {
-                let Some(mut rx) = bus
+                let mut rx = bus
                     .register_plugin(&runtime.id, &topics, &runtime.policy.subscriptions)
-                    .await
-                else {
-                    return;
-                };
+                    .await;
                 while let Some(event) = rx.recv().await {
                     if let Err(e) = VtxPluginExecutor::dispatch_event_with(
                         EventDispatchContext {
@@ -494,7 +491,7 @@ impl PluginManager {
                 500u16
             })?;
 
-        let plugin = Plugin::new(&mut store, &instance).map_err(|_| 500u16)?;
+        let plugin = VtxPlugin::new(&mut store, &instance).map_err(|_| 500u16)?;
 
         plugin
             .call_authenticate(&mut store, headers)

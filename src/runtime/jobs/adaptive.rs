@@ -1,5 +1,5 @@
 use crate::config::AdaptiveScanSettings;
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use std::sync::{
     atomic::{AtomicUsize, Ordering},
     Arc,
@@ -56,7 +56,7 @@ impl AdaptiveScanLimiter {
 }
 
 pub(crate) fn spawn_adaptive_controller(
-    registry: VideoRegistry,
+    registry: VtxVideoRegistry,
     settings: AdaptiveScanSettings,
     limiter: Arc<AdaptiveScanLimiter>,
 ) {

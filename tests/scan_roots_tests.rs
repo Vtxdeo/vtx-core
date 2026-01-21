@@ -1,12 +1,12 @@
 use tempfile::tempdir;
 use url::Url;
-use vtx_core::storage::VideoRegistry;
+use vtx_core::storage::VtxVideoRegistry;
 
 #[test]
 fn add_list_remove_scan_root() {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
     let root_dir = temp_dir.path().join("media");
     std::fs::create_dir_all(&root_dir).expect("create root");
@@ -27,7 +27,7 @@ fn add_list_remove_scan_root() {
 fn add_scan_root_rejects_file_path() {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
 
     let file_path = temp_dir.path().join("not-a-dir.txt");
     std::fs::write(&file_path, "x").expect("write file");

@@ -1,5 +1,5 @@
-use crate::runtime::host_impl::api::auth_types::UserContext;
 use crate::runtime::job_registry;
+use crate::runtime::vtx_host_impl::api::vtx_auth_types::UserContext;
 use crate::web::state::AppState;
 use crate::web::utils::errors;
 use axum::{

@@ -1,12 +1,12 @@
 use rusqlite::params;
 use tempfile::tempdir;
-use vtx_core::storage::VideoRegistry;
+use vtx_core::storage::VtxVideoRegistry;
 
 #[test]
 fn initialize_pool_creates_core_tables() {
     let temp_dir = tempdir().expect("tempdir");
     let db_path = temp_dir.path().join("vtx.db");
-    let registry = VideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
+    let registry = VtxVideoRegistry::new(db_path.to_string_lossy().as_ref(), 1).expect("registry");
     let conn = registry.get_conn().expect("conn");
 
     let table_exists = |name: &str| -> bool {

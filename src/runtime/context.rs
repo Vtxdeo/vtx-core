@@ -3,8 +3,8 @@ use wasmtime_wasi::{ResourceTable, WasiCtx, WasiCtxBuilder, WasiCtxView, WasiVie
 
 use crate::runtime::bus::EventBus;
 use crate::runtime::ffmpeg::VtxFfmpegManager;
-use crate::runtime::host_impl::api::types::HttpAllowRule;
-use crate::storage::VideoRegistry;
+use crate::runtime::vtx_host_impl::api::vtx_types::HttpAllowRule;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -19,7 +19,7 @@ pub enum SecurityPolicy {
 pub struct StreamContext {
     pub table: ResourceTable,
     pub wasi: WasiCtx,
-    pub registry: VideoRegistry,
+    pub registry: VtxVideoRegistry,
     pub limiter: wasmtime::StoreLimits,
     pub policy: SecurityPolicy,
     pub plugin_id: Option<String>,
@@ -34,7 +34,7 @@ pub struct StreamContext {
 }
 
 pub struct StreamContextConfig {
-    pub registry: VideoRegistry,
+    pub registry: VtxVideoRegistry,
     pub vtx_ffmpeg: Arc<VtxFfmpegManager>,
     pub limiter: wasmtime::StoreLimits,
     pub policy: SecurityPolicy,

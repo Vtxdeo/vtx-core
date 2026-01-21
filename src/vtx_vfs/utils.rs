@@ -66,12 +66,11 @@ pub(super) fn same_authority(left: &Url, right: &Url) -> bool {
         && left.port_or_known_default() == right.port_or_known_default()
 }
 
-pub(super) fn to_range(start: u64, end: u64) -> anyhow::Result<std::ops::Range<usize>> {
+pub(super) fn to_range(start: u64, end: u64) -> anyhow::Result<std::ops::Range<u64>> {
     if end < start {
         return Err(anyhow::anyhow!("Invalid range"));
     }
-    let start = usize::try_from(start)?;
-    let end = usize::try_from(end.saturating_add(1))?;
+    let end = end.saturating_add(1);
     Ok(start..end)
 }
 

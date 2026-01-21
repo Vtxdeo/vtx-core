@@ -16,16 +16,16 @@ use tracing::info;
 use wasmtime::component::{HasSelf, Linker};
 use wasmtime_wasi::p2::add_to_linker_async;
 
-use crate::config::Settings;
+use crate::config::VtxSettings;
 use crate::runtime::{
     bus::EventBus,
     ffmpeg::VtxFfmpegManager,
-    host_impl::api,
-    host_impl::ipc_transport::IpcTransport,
     jobs,
     manager::{PluginManager, PluginManagerConfig},
+    vtx_host_impl::api,
+    vtx_host_impl::vtx_ipc_transport::VtxIpcTransport,
 };
-use crate::storage::VideoRegistry;
+use crate::storage::VtxVideoRegistry;
 use crate::vtx_vfs::VtxVfsManager;
 use crate::web::{
     api::{admin, plugin, ws},
@@ -44,9 +44,9 @@ async fn main() -> anyhow::Result<()> {
         .with_writer(io::stderr)
         .init();
 
-    info!("[Startup] vtxdeo Core V0.1.3 initializing...");
+    info!("[Startup] vtxdeo Core V0.1.6 initializing...");
 
-    let settings = Settings::new().expect("Failed to load config");
+    let settings = VtxSettings::new().expect("Failed to load config");
     info!(
         "[Config] Binding at {}:{}",
         settings.server.host, settings.server.port
@@ -76,14 +76,14 @@ async fn main() -> anyhow::Result<()> {
     let engine = wasmtime::Engine::new(&wasm_config)?;
     let mut linker = Linker::<runtime::context::StreamContext>::new(&engine);
     add_to_linker_async(&mut linker)?;
-    api::stream_io::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::sql::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::ffmpeg::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::context::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::event_bus::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
-    api::http_client::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_vfs::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_sql::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_ffmpeg::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_context::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_event_bus::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
+    api::vtx_http_client::add_to_linker::<_, HasSelf<_>>(&mut linker, |ctx| ctx)?;
 
-    let registry = VideoRegistry::new(&settings.database.url, 120)?;
+    let registry = VtxVideoRegistry::new(&settings.database.url, 120)?;
     let vfs = Arc::new(VtxVfsManager::new()?);
 
     let vtx_ffmpeg_manager = Arc::new(VtxFfmpegManager::new(
@@ -92,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
 
     let event_bus = Arc::new(EventBus::new(256));
     let (ipc_outbound_tx, ipc_outbound_rx) = tokio::sync::mpsc::channel(100);
-    IpcTransport::spawn(ipc_outbound_rx);
+    VtxIpcTransport::spawn(ipc_outbound_rx);
 
     let plugin_manager = PluginManager::new(PluginManagerConfig {
         engine: engine.clone(),
