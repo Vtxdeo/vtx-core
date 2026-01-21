@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::io::{Cursor, Seek, SeekFrom};
 
+use futures_util::StreamExt;
 use reqwest::redirect::Policy;
 use reqwest::{header, Client, Method};
 use url::Url;
@@ -71,16 +72,19 @@ impl api::vtx_http_client::Host for StreamContext {
             .filter_map(|(k, v)| v.to_str().ok().map(|val| (k.to_string(), val.to_string())))
             .collect::<Vec<_>>();
 
-        let mut body_bytes = response
-            .bytes()
-            .await
-            .map_err(|e| format!("Failed to read response body: {}", e))?
-            .to_vec();
-
-        if let Some(limit) = rule.max_response_bytes {
-            if body_bytes.len() as u64 > limit {
-                return Err("Response body exceeded max-response-bytes".into());
+        let mut body_bytes = Vec::new();
+        let mut total_read = 0u64;
+        let mut stream = response.bytes_stream();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk.map_err(|e| format!("Failed to read response body: {}", e))?;
+            if let Some(limit) = rule.max_response_bytes {
+                let next_total = total_read.saturating_add(chunk.len() as u64);
+                if next_total > limit {
+                    return Err("Response body exceeded max-response-bytes".into());
+                }
+                total_read = next_total;
             }
+            body_bytes.extend_from_slice(&chunk);
         }
 
         let body = if body_bytes.is_empty() {

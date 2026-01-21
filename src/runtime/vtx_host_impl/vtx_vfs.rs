@@ -130,9 +130,14 @@ impl api::vtx_vfs::Host for StreamContext {
         }
 
         let normalized = self.vfs.normalize_uri(&uri).map_err(|e| e.to_string())?;
+        let limit = if self.max_buffer_read_bytes == 0 {
+            len
+        } else {
+            std::cmp::min(len, self.max_buffer_read_bytes)
+        };
         let bytes = self
             .vfs
-            .read_range(&normalized, offset, len)
+            .read_range(&normalized, offset, limit)
             .await
             .map_err(|e| e.to_string())?;
         Ok(bytes.to_vec())
